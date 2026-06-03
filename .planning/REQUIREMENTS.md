@@ -90,12 +90,51 @@
 
 ## Traceability
 
-| Requirement | Phase |
-|-------------|-------|
-| INFRA-01 through INFRA-06 | Phase 1 |
-| OBS-01 through OBS-09 | Phase 1 |
-| DIAG-01 through DIAG-07 | Phase 2 |
-| REM-01 through REM-08 | Phase 3 |
-| SLO-01 through SLO-05 | Phase 2 |
-| DASH-01 through DASH-06 | Phase 4 |
-| INC-01 through INC-05 | Phase 4 |
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| INFRA-01 | Phase 1: Infrastructure and Observers | Pending |
+| INFRA-02 | Phase 1: Infrastructure and Observers | Pending |
+| INFRA-03 | Phase 1: Infrastructure and Observers | Pending |
+| INFRA-04 | Phase 1: Infrastructure and Observers | Pending |
+| INFRA-05 | Phase 1: Infrastructure and Observers | Pending |
+| INFRA-06 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-01 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-02 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-03 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-04 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-05 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-06 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-07 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-08 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-09 | Phase 1: Infrastructure and Observers | Pending |
+| DIAG-01 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-02 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-03 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-04 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-05 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-06 | Phase 2: Diagnosis and SLO Engine | Pending |
+| DIAG-07 | Phase 2: Diagnosis and SLO Engine | Pending |
+| SLO-01 | Phase 2: Diagnosis and SLO Engine | Pending |
+| SLO-02 | Phase 2: Diagnosis and SLO Engine | Pending |
+| SLO-03 | Phase 2: Diagnosis and SLO Engine | Pending |
+| SLO-04 | Phase 2: Diagnosis and SLO Engine | Pending |
+| SLO-05 | Phase 2: Diagnosis and SLO Engine | Pending |
+| REM-01 | Phase 3: Safe Remediation | Pending |
+| REM-02 | Phase 3: Safe Remediation | Pending |
+| REM-03 | Phase 3: Safe Remediation | Pending |
+| REM-04 | Phase 3: Safe Remediation | Pending |
+| REM-05 | Phase 3: Safe Remediation | Pending |
+| REM-06 | Phase 3: Safe Remediation | Pending |
+| REM-07 | Phase 3: Safe Remediation | Pending |
+| REM-08 | Phase 3: Safe Remediation | Pending |
+| DASH-01 | Phase 4: Dashboard and Incident Docs | Pending |
+| DASH-02 | Phase 4: Dashboard and Incident Docs | Pending |
+| DASH-03 | Phase 4: Dashboard and Incident Docs | Pending |
+| DASH-04 | Phase 4: Dashboard and Incident Docs | Pending |
+| DASH-05 | Phase 4: Dashboard and Incident Docs | Pending |
+| DASH-06 | Phase 4: Dashboard and Incident Docs | Pending |
+| INC-01 | Phase 4: Dashboard and Incident Docs | Pending |
+| INC-02 | Phase 4: Dashboard and Incident Docs | Pending |
+| INC-03 | Phase 4: Dashboard and Incident Docs | Pending |
+| INC-04 | Phase 4: Dashboard and Incident Docs | Pending |
+| INC-05 | Phase 4: Dashboard and Incident Docs | Pending |
