@@ -4,6 +4,110 @@
 
 ---
 
+## LOCAL DEVELOPMENT Architecture
+
+```
+YOUR LAPTOP
+───────────────────────────────────────────────────────────────────────
+
+  Terminal 1: Frontend
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Vite Dev Server   (node:22)                                    │
+  │  URL:  http://localhost:5173                                    │
+  │  Cmd:  cd atoloan-ui && npm run dev                            │
+  │                                                                 │
+  │  Hot-reload: edit a .tsx file → browser updates instantly      │
+  │  VITE_API_URL=http://127.0.0.1:8000  (.env.development)        │
+  │                                                                 │
+  │  React 19 app (TypeScript source, NOT built/bundled)           │
+  └─────────────────────┬───────────────────────────────────────────┘
+                        │  API calls to http://127.0.0.1:8000
+                        ▼
+
+  Terminal 2: Backend
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  uvicorn  (FastAPI, Python 3.12)                                │
+  │  URL:  http://127.0.0.1:8000                                   │
+  │  Cmd:  uvicorn app.main:app --reload --port 8000               │
+  │                                                                 │
+  │  --reload flag: edit a .py file → server restarts instantly    │
+  │  Reads secrets from: .env file (NOT AWS Secrets Manager)       │
+  │                                                                 │
+  │  .env file contains:                                            │
+  │    PGHOST=localhost   PGPORT=5432                               │
+  │    PGUSER=atoloan     PGPASSWORD=atoloan                        │
+  │    PGDATABASE=atoloan                                           │
+  │    ANTHROPIC_API_KEY=sk-ant-...                                 │
+  │    SEVENCREDIT_ACCOUNT=...  (test env)                         │
+  └─────────────────────┬───────────────────────────────────────────┘
+                        │  asyncpg connection to localhost:5432
+                        ▼
+
+  Terminal 3 (or Option A): Database
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  OPTION A — docker-compose  (recommended)                       │
+  │  Cmd: docker-compose up                                         │
+  │                                                                 │
+  │  Starts TWO containers:                                         │
+  │  ┌──────────────────┐    ┌──────────────────────────────────┐  │
+  │  │ postgres:16-alpine│    │  atoloan-api  (built from        │  │
+  │  │ port: 5432        │    │  Dockerfile)                     │  │
+  │  │ user: atoloan     │◄───│  port: 8000                      │  │
+  │  │ db:   atoloan     │    │  PGHOST=db (docker network)      │  │
+  │  │ volume: postgres_ │    └──────────────────────────────────┘  │
+  │  │         data      │                                           │
+  │  └──────────────────┘                                           │
+  │                                                                 │
+  │  OPTION B — local Postgres (already installed)                  │
+  │  psql -U postgres -c "CREATE DATABASE atoloan;"                 │
+  │  Then run uvicorn directly (Terminal 2 above)                   │
+  └─────────────────────────────────────────────────────────────────┘
+
+  What's MISSING locally vs prod:
+  ✗ No K8s / k3s          (no pods, no namespaces, no ingress)
+  ✗ No nginx              (Vite serves frontend directly)
+  ✗ No TLS / HTTPS        (plain HTTP localhost)
+  ✗ No cert-manager       (no SSL certificates)
+  ✗ No External Secrets   (secrets come from .env file instead)
+  ✗ No AWS Secrets Manager (no IAM role needed)
+  ✗ No RDS               (plain Postgres on localhost or docker)
+  ✗ No Route 53           (no DNS, just localhost)
+  ✓ Same Python code      (uvicorn = same server used in prod)
+  ✓ Same React code       (same components, different dev server)
+  ✓ Same database schema  (SQLAlchemy auto-creates tables on startup)
+```
+
+---
+
+## LOCAL vs AWS PROD — Side-by-Side Comparison
+
+```
+COMPONENT         LOCAL DEV                    AWS PROD
+────────────────  ───────────────────────────  ──────────────────────────────
+Frontend server   Vite dev server :5173        nginx in K8s pod :80
+Frontend URL      http://localhost:5173        https://atoloans.com
+Frontend build    No build — hot reload        Docker: node build → nginx serve
+Backend server    uvicorn --reload :8000       uvicorn in K8s pod :8000 (×2)
+Backend URL       http://127.0.0.1:8000        https://api.atoloans.com
+TLS / HTTPS       None (HTTP only)             cert-manager + Let's Encrypt
+Load balancer     None (1 process)             ingress-nginx + 2 replicas
+Database          localhost:5432 or docker     AWS RDS us-east-2 (private subnet)
+DB hostname       localhost                    postgres.atoloans.com (Route 53)
+Secrets           .env file (gitignored)       AWS Secrets Manager → ESO → K8s Secret
+Kubernetes        Not used                     k3s (server + agent EC2 t3.small)
+File uploads      ./upload_pdf/               K8s PVC: upload-pdfs (5 Gi)
+                  ./user_uploaded_documents/  K8s PVC: user-docs (5 Gi)
+700Credit env     test                         prod
+CORS              localhost:5173, :5174        https://atoloans.com
+Replicas          1 (single process)           2 pods (zero-downtime rolling deploy)
+Docker            Optional (docker-compose)    Required (images on Docker Hub)
+Infrastructure    Nothing to provision         Terraform manages all AWS resources
+```
+
+---
+
+## AWS PROD Architecture
+
 ## The Big Picture
 
 ```
