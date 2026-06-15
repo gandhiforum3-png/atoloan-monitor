@@ -28,13 +28,15 @@ from redis.asyncio import Redis
 from agent.shared.models import DiagnosisResult, SignalBundle
 from agent.shared.safety import SafetyViolation, safety_check
 from agent.skills.remediators import human_escalator
-from agent.skills.remediators.node_remediator import (
+from agent.shared.remediation import (
     THRESHOLDS,
+    _log_action,
+    _meets_threshold,
+)
+from agent.skills.remediators.node_remediator import (
     _execute_pod_restart,
     _execute_scale_down,
     _load_k8s_config,
-    _log_action,
-    _meets_threshold,
     _preflight_pod_restart,
     _preflight_scale_down,
 )
@@ -327,8 +329,8 @@ async def _tool_restart_deployment(
         await _log_action(redis, incident_id, "k8s", action, "safety_blocked", confidence, str(exc))
         return {"status": "safety_blocked", "detail": str(exc)}
 
-    if not _meets_threshold(action, confidence):
-        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS[action]}"
+    if not _meets_threshold("k8s", action, confidence):
+        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS['k8s'][action]}"
         await _log_action(redis, incident_id, "k8s", action, "threshold_not_met", confidence, detail)
         return {"status": "threshold_not_met", "detail": detail}
 
@@ -371,8 +373,8 @@ async def _tool_scale_down_deployment(
         await _log_action(redis, incident_id, "k8s", action, "safety_blocked", confidence, str(exc))
         return {"status": "safety_blocked", "detail": str(exc)}
 
-    if not _meets_threshold(action, confidence):
-        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS[action]}"
+    if not _meets_threshold("k8s", action, confidence):
+        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS['k8s'][action]}"
         await _log_action(redis, incident_id, "k8s", action, "threshold_not_met", confidence, detail)
         return {"status": "threshold_not_met", "detail": detail}
 

@@ -13,7 +13,6 @@ pass:
   - deployment_scale_down  → reduce replicas by 1, never below 1
 """
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import structlog
@@ -23,55 +22,18 @@ from kubernetes_asyncio.client import ApiException
 from redis.asyncio import Redis
 
 from agent.shared.models import DiagnosisResult, InfraEvent
+from agent.shared.remediation import (
+    PreflightResult,
+    THRESHOLDS,
+    _log_action,
+    _meets_threshold,
+)
 from agent.shared.safety import FORBIDDEN_OPERATIONS, SafetyViolation, safety_check
 
 logger = structlog.get_logger()
 
-# Per-action confidence thresholds (from REQUIREMENTS.md)
-THRESHOLDS: dict[str, float] = {
-    "pod_restart": 0.80,
-    "deployment_scale_down": 0.85,
-    "human_escalate": 0.00,
-}
-
 RESTART_ANNOTATION = "kubectl.kubernetes.io/restartedAt"
 RESTART_COOLDOWN_SECONDS = 300
-
-
-@dataclass
-class PreflightResult:
-    ok: bool
-    reason: str = ""
-
-
-def _meets_threshold(action_type: str, confidence: float) -> bool:
-    threshold = THRESHOLDS.get(action_type, 1.0)
-    return confidence >= threshold
-
-
-async def _log_action(
-    redis: Redis,
-    incident_id: str,
-    domain: str,
-    action: str,
-    status: str,
-    confidence: float,
-    detail: str,
-) -> None:
-    await redis.xadd(
-        "actions:log",
-        {
-            "incident_id": incident_id,
-            "domain": domain,
-            "action": action,
-            "status": status,
-            "confidence": str(confidence),
-            "detail": detail,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-        maxlen=10_000,
-        approximate=True,
-    )
 
 
 async def _load_k8s_config() -> None:
@@ -220,10 +182,10 @@ async def remediate(
                           "Confidence too low to act; continuing observation")
         return "observe_only"
 
-    if not _meets_threshold(action, confidence):
+    if not _meets_threshold("k8s", action, confidence):
         # Caller (orchestrator) should have already routed below-threshold to escalator,
         # but guard here defensively.
-        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS.get(action, 1.0)}"
+        detail = f"confidence {confidence:.2f} < threshold {THRESHOLDS['k8s'].get(action, 1.0)}"
         logger.warning("threshold_not_met", incident_id=incident_id, action=action, detail=detail)
         await _log_action(redis, incident_id, "k8s", action, "threshold_not_met", confidence, detail)
         return "threshold_not_met"
