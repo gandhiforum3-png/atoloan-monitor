@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Executing Phase 01
-last_updated: "2026-06-15T09:00:00.000Z"
+last_updated: "2026-06-15T09:08:00.000Z"
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State — Atoloan Monitor
@@ -24,17 +24,17 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | Infrastructure and Observers | In Progress (4/6 plans) |
+| 1 | Infrastructure and Observers | In Progress (5/6 plans) |
 | 2 | Diagnosis and SLO Engine | Not Started |
 | 3 | Safe Remediation | Not Started |
 | 4 | Dashboard and Incident Docs | Not Started |
 
 ## Active Phase
 
-**Phase 1 — Infrastructure and Observers** (4/6 plans complete)
+**Phase 1 — Infrastructure and Observers** (5/6 plans complete)
 
-- Current plan: 01-05 (next — D-01/D-02: open action_type to str + safety-floor regression, checkpoint)
-- Just completed: 01-04 built the DomainConfig registry (agent/registry.py: dataclass + REGISTRY + register(), no skill/observer/K8s imports) and a fully config-driven agent/orchestrators/generic_orchestrator.py (run drives consume/debounce/bundle/dispatch for any DomainConfig; _should_escalate takes config.escalate_below; no K8s client import). k8s_orchestrator shrank to _fetch_pods_on_nodes + a single register(DomainConfig(domain="k8s", ...)). human_escalator._derive_urgency/escalate now take a per-domain urgency_map (k8s map verbatim, p3 fall-through + node_network_unavailable gap preserved). Added tests/test_registry.py; full suite green (60 passed)
+- Current plan: 01-06 (next — D-14/D-15/D-16: registry-driven runner + ADDING-A-MONITOR.md + e2e checkpoint)
+- Just completed: 01-05 opened DiagnosisResult.action_type from a closed 4-value Literal to an open str (D-01/D-02) — the JSON-schema enum that API-constrained Claude is gone from the shared model; InfraEvent.domain/severity, urgency, blast_radius stay Literal; agent/shared/safety.py byte-unchanged (frozen). node_diagnoser re-injects a per-domain action enum into its tool input_schema (via a new optional input_schema arg on diagnose_with_claude) so its Claude call stays API-constrained to the 4 k8s actions; _SYSTEM_PROMPT prose kept as a second layer. Regression net proves the boundary contains the widening: forbidden ops (drain_node/terminate_instance/drop_table) still raise SafetyViolation, an unknown action never meets the execution threshold, and a novel action escalates/never executes. Blocking human-verify checkpoint approved. Full suite green (67 passed)
 
 ## Decisions
 
@@ -49,6 +49,9 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 - DomainConfig registry is the single wiring point for a domain; registry.py imports nothing from agent.skills/agent.observers (consumed BY orchestrators) to keep the dependency one-directional and avoid a circular import.
 - Generic orchestrator is config-driven and K8s-client-free; domain-specific context fetch (K8s pod listing) injected via DomainConfig.context_fetcher (T-01-12). DomainConfig carries an observer field now for the D-14 runner even though 01-04 doesn't consume it.
 - escalate_below (routing floors, 1.1 sentinels) kept SEPARATE from THRESHOLDS (execution gate, 0.00 sentinels) on DomainConfig — intentionally not merged (T-01-09). Per-domain urgency_map travels on the config; _derive_urgency/escalate default an absent map to {} -> p3_within_1h.
+- DiagnosisResult.action_type opened from a closed 4-value Literal to an open str (D-01/D-02) — removes the JSON-schema enum from the shared model so future domains can express new actions; InfraEvent.domain/severity, HumanEscalationPacket.urgency, and estimated_blast_radius all stay Literal; safety.py frozen.
+- Per-domain enum re-injection in node_diagnoser: the shared DiagnosisResult carries an open str, but each diagnoser re-injects its own per-domain action enum into the tool input_schema it hands to Claude (via the new optional input_schema arg on diagnose_with_claude) — keeps the API constraint local to the domain instead of re-closing the shared model. _SYSTEM_PROMPT prose is a second layer.
+- The execution threshold gate — NOT escalation routing — is the hard backstop guaranteeing a novel/unknown action never executes: _meets_threshold two-level .get default 1.0 means an unknown action can never meet the threshold, so remediate() returns threshold_not_met without acting. A high-confidence novel action passes the routing floor (no escalate_below entry -> 0.80 default), which is precisely why the threshold gate must be the backstop. (Corrected a plan assertion that claimed routing contained high-confidence novel actions; the "never executes" outcome holds, only the enforcing layer was corrected.)
 
 ## Performance Metrics
 
@@ -58,6 +61,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 | 01 | 02 | ~3min | 2 | 4 |
 | 01 | 03 | ~5min | 2 | 5 |
 | 01 | 04 | ~6min | 2 | 7 |
+| 01 | 05 | ~6min | 2 | 6 |
 
 ## Completed Phases
 
@@ -65,9 +69,9 @@ None yet.
 
 ## Last Session
 
-- Stopped at: Completed 01-04-PLAN.md
+- Stopped at: Completed 01-05-PLAN.md
 - Resume file: None
-- Timestamp: 2026-06-15T09:00:00Z
+- Timestamp: 2026-06-15T09:08:00Z
 
 ## Notes
 
