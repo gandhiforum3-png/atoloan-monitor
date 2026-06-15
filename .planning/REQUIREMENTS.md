@@ -14,14 +14,14 @@
 ### OBS — Observation Layer (Event-Driven)
 
 - [ ] **OBS-01**: K8s pod observer subscribes to the Kubernetes Watch API for pod events: OOMKills, CrashLoopBackOff, pending pods, failed scheduling — with 410 Gone reconnection and resourceVersion bookmarking
-- [ ] **OBS-02**: K8s node observer watches node conditions: memory pressure, disk pressure, PID pressure, node not ready, eviction events
+- [x] **OBS-02**: K8s node observer watches node conditions: memory pressure, disk pressure, PID pressure, node not ready, eviction events
 - [ ] **OBS-03**: EC2 metrics observer receives CloudWatch Alarm state-change events for CPU, memory, disk, and network across all 3 instances
 - [ ] **OBS-04**: FastAPI trace observer scrapes Prometheus endpoints every 30 seconds for: request latency (p50/p95/p99), error rate per endpoint, active connections, retry counts
 - [ ] **OBS-05**: Postgres observer queries `pg_stat_activity`, `pg_stat_statements`, `pg_stat_replication`, and connection pool depth every 60 seconds on the application database
 - [ ] **OBS-06**: Log analyzer streams application and system logs, classifies log lines using Claude Haiku, emits structured anomaly events for ERROR/FATAL patterns and repeated warnings
 - [ ] **OBS-07**: Security group auditor runs on a 6-hour schedule to check for overly permissive rules (0.0.0.0/0 on non-80/443 ports, unexpected port openings)
 - [ ] **OBS-08**: Secrets health checker runs on a 1-hour schedule to detect expiring secrets (< 7 days) or stale secrets (not rotated in > 90 days) in AWS Secrets Manager
-- [ ] **OBS-09**: All observer signals normalized to a shared `InfraEvent` schema (source, layer, severity, metric_name, value, timestamp, raw_payload) before entering the event bus
+- [x] **OBS-09**: All observer signals normalized to a shared `InfraEvent` schema (source, layer, severity, metric_name, value, timestamp, raw_payload) before entering the event bus
 
 ### DIAG — Diagnosis Layer
 
@@ -99,14 +99,14 @@
 | INFRA-05 | Phase 1: Infrastructure and Observers | Pending |
 | INFRA-06 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-01 | Phase 1: Infrastructure and Observers | Pending |
-| OBS-02 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-02 | Phase 1: Infrastructure and Observers | Complete (01-01) |
 | OBS-03 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-04 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-05 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-06 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-07 | Phase 1: Infrastructure and Observers | Pending |
 | OBS-08 | Phase 1: Infrastructure and Observers | Pending |
-| OBS-09 | Phase 1: Infrastructure and Observers | Pending |
+| OBS-09 | Phase 1: Infrastructure and Observers | Complete (01-01) |
 | DIAG-01 | Phase 2: Diagnosis and SLO Engine | Pending |
 | DIAG-02 | Phase 2: Diagnosis and SLO Engine | Pending |
 | DIAG-03 | Phase 2: Diagnosis and SLO Engine | Pending |

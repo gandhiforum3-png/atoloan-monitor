@@ -27,7 +27,7 @@ Atoloan Monitor is built in four dependency-ordered phases. Phase 1 lays the eve
 **Sub-scope (this planning round)**: Generic-monitor framework refactor (CONTEXT.md D-01..D-16) — generalize the existing K8s node monitor into a registry-based observer/orchestrator/skill framework. Migrates OBS-02 behavior-preserving and ships the ADDING-A-MONITOR.md recipe; INFRA-01..06 and OBS-01/03..08 remain Pending for future phases.
 **Plans**: 6 plans (6 waves)
 Plans:
-- [ ] 01-01-PLAN.md — Wave 0: pytest harness + baseline tests capturing CURRENT behavior
+- [x] 01-01-PLAN.md — Wave 0: pytest harness + baseline tests capturing CURRENT behavior
 - [ ] 01-02-PLAN.md — D-03/D-04/D-05: extract shared remediation primitives (domain-keyed THRESHOLDS)
 - [ ] 01-03-PLAN.md — D-06/D-07/D-08/D-09: extract diagnoser_base + agent_loop shared modules
 - [ ] 01-04-PLAN.md — D-10/D-11/D-12/D-13: DomainConfig registry + generic orchestrator + per-domain urgency
@@ -78,7 +78,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Infrastructure and Observers | 0/TBD | Not started | - |
+| 1. Infrastructure and Observers | 1/6 | In progress | - |
 | 2. Diagnosis and SLO Engine | 0/TBD | Not started | - |
 | 3. Safe Remediation | 0/TBD | Not started | - |
 | 4. Dashboard and Incident Docs | 0/TBD | Not started | - |
