@@ -21,21 +21,19 @@ from agent.shared.models import DiagnosisResult, HumanEscalationPacket, InfraEve
 
 logger = structlog.get_logger()
 
-_URGENCY_MAP = {
-    "node_not_ready": "p1_immediate",
-    "node_memory_pressure": "p2_within_15m",
-    "node_disk_pressure": "p2_within_15m",
-    "node_pid_pressure": "p2_within_15m",
-}
+def _derive_urgency(signals: list[InfraEvent], urgency_map: dict[str, str]) -> str:
+    """Derive an urgency from signals using a per-domain urgency_map.
 
-
-def _derive_urgency(signals: list[InfraEvent]) -> str:
+    p1_immediate if any signal maps to it; else the first mapped urgency;
+    else the conservative "p3_within_1h" fall-through (preserved for unmapped /
+    empty signals and an empty urgency_map).
+    """
     for s in signals:
-        urgency = _URGENCY_MAP.get(s.event_type)
+        urgency = urgency_map.get(s.event_type)
         if urgency == "p1_immediate":
             return "p1_immediate"
     for s in signals:
-        urgency = _URGENCY_MAP.get(s.event_type)
+        urgency = urgency_map.get(s.event_type)
         if urgency:
             return urgency
     return "p3_within_1h"
@@ -47,16 +45,20 @@ async def escalate(
     diagnosis: DiagnosisResult,
     signals: list[InfraEvent],
     why: str,
+    urgency_map: dict[str, str] | None = None,
 ) -> str:
     """
     Publish escalation packet and return the incident_id.
 
     Args:
-        redis:     Async Redis client.
-        domain:    Event domain ("k8s", "db", etc.).
-        diagnosis: Structured diagnosis from Claude.
-        signals:   Raw signals that triggered this escalation.
-        why:       Human-readable reason for escalating instead of auto-remediating.
+        redis:       Async Redis client.
+        domain:      Event domain ("k8s", "db", etc.).
+        diagnosis:   Structured diagnosis from Claude.
+        signals:     Raw signals that triggered this escalation.
+        why:         Human-readable reason for escalating instead of auto-remediating.
+        urgency_map: Per-domain event_type -> urgency map. Defaults to {} (an empty
+                     map -> everything falls through to p3_within_1h, the safe
+                     conservative default for any caller that does not supply one).
     """
     incident_id = str(uuid.uuid4())[:8]
     now = datetime.now(timezone.utc)
@@ -65,10 +67,10 @@ async def escalate(
         incident_id=incident_id,
         timestamp=now,
         summary=(
-            f"{len(signals)} node signal(s) detected. "
+            f"{len(signals)} {domain} signal(s) detected. "
             f"Root cause: {diagnosis.root_cause[:120]}"
         ),
-        urgency=_derive_urgency(signals),
+        urgency=_derive_urgency(signals, urgency_map or {}),
         diagnosis=diagnosis,
         why_escalated=why,
         raw_signals=signals,
