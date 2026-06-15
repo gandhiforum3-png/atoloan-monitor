@@ -1,4 +1,6 @@
 anthropic>=0.40.0
+langchain-anthropic>=1.4.6
+langchain-core>=1.4.7
 kubernetes-asyncio>=30.0.0
 redis[asyncio]>=5.0.0
 pydantic>=2.0.0
