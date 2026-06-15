@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-15T07:13:08.866Z",
+  "phase": "1",
+  "phase_name": "Infrastructure and Observers",
+  "phase_dir": ".planning/phases/01-infrastructure-and-observers",
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Capture CONTEXT.md for generic-monitor refactor sub-scope of Phase 1", "status": "done", "commit": "be24b62"}
+  ],
+  "remaining_tasks": [
+    {"id": 2, "name": "Run gsd-phase-researcher for the refactor (registry pattern, generic agent-loop/diagnoser extraction, DomainConfig design)", "status": "not_started"},
+    {"id": 3, "name": "Spawn gsd-planner to produce PLAN.md(s) implementing D-01 through D-16", "status": "not_started"},
+    {"id": 4, "name": "Spawn gsd-plan-checker, run revision loop (max 3 iterations) until VERIFICATION PASSED", "status": "not_started"},
+    {"id": 5, "name": "Requirements coverage gate (check OBS-02 / framework-related requirement IDs covered)", "status": "not_started"},
+    {"id": 6, "name": "Present final status / offer next steps (execute-phase)", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "Phase 1 sub-scope = generalize the existing K8s node monitor (observer + orchestrator + diagnoser/remediator/agent) into a registry-based framework; do NOT implement the other 7 observers/remediators in this phase.",
+      "rationale": "User asked 'will it work for k8s pod, ec2, or other services?' — this refactor proves the framework generalizes, and becomes the recipe (ADDING-A-MONITOR.md) for the remaining OBS-*/REM-* work.",
+      "phase": "1"
+    },
+    {
+      "decision": "DiagnosisResult.action_type (agent/shared/models.py) changes from a closed Literal to an open str, validated against per-domain THRESHOLDS keys; safety.py FORBIDDEN_OPERATIONS remains the unchanged global floor.",
+      "rationale": "Without this, EC2 (reboot_instance) and Postgres (kill_query) action types could never be expressed by Claude — this was identified as the one required change to make the registry pattern actually work for non-k8s domains.",
+      "phase": "1"
+    },
+    {
+      "decision": "Extract shared primitives: PreflightResult/_meets_threshold/_log_action/THRESHOLDS -> agent/shared/remediation.py; agent loop -> agent/shared/agent_loop.py::run_tool_loop; diagnoser call -> agent/shared/diagnoser_base.py::diagnose_with_claude; debounce/consumer-group loop -> agent/orchestrators/generic_orchestrator.py; new agent/registry.py with DomainConfig.",
+      "rationale": "These are the pieces currently duplicated-by-necessity in node_remediator.py/node_agent.py/node_diagnoser.py/k8s_orchestrator.py that every future domain would otherwise have to copy-paste.",
+      "phase": "1"
+    },
+    {
+      "decision": "K8s node monitor behavior (both mode='diagnoser' and mode='agent', including the recent NetworkUnavailable/node_deleted additions) must be unchanged after refactor — this is the acceptance bar.",
+      "rationale": "Refactor must be behavior-preserving; node_remediator.py was just verified end-to-end against minikube and that verification should remain valid.",
+      "phase": "1"
+    }
+  ],
+  "uncommitted_files": [],
+  "next_action": "Run /gsd:plan-phase 1 in a fresh session. CONTEXT.md already exists (be24b62) so the context gate is skipped. Confirm 'Research first' when asked, then let gsd-phase-researcher -> gsd-planner -> gsd-plan-checker run.",
+  "context_notes": "We're mid /gsd:plan-phase 1 workflow. Step 4 (load CONTEXT.md) is done -- CONTEXT.md written and committed with all 16 decisions (D-01..D-16) from the architecture discussion. Step 5 (research) was about to start (user picked 'Research first / Recommended') when context hit 86% and we paused before spawning gsd-phase-researcher. No PLAN.md exists yet. Nothing else in the repo was modified this session beyond the CONTEXT.md commit."
+}
