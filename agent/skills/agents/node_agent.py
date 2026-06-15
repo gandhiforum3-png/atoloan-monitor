@@ -17,14 +17,13 @@ Selected via k8s_orchestrator's mode="agent" (vs. the default mode="diagnoser",
 which uses node_diagnoser + node_remediator). Both paths can be run and compared.
 """
 
-import json
-
 import structlog
 from anthropic import AsyncAnthropic
 from kubernetes_asyncio import client
 from kubernetes_asyncio.client import ApiException
 from redis.asyncio import Redis
 
+from agent.shared.agent_loop import run_tool_loop
 from agent.shared.models import DiagnosisResult, SignalBundle
 from agent.shared.safety import SafetyViolation, safety_check
 from agent.skills.remediators import human_escalator
@@ -477,21 +476,6 @@ async def _dispatch_tool(name: str, tool_input: dict, ctx: dict) -> dict:
     return {"error": f"unknown tool '{name}'"}
 
 
-async def _escalate_unresolved(redis: Redis, signals, reason: str) -> None:
-    diagnosis = DiagnosisResult(
-        root_cause="Agent loop did not reach a resolution within its iteration budget.",
-        affected_components=[],
-        contributing_factors=[],
-        confidence=0.0,
-        confidence_reasoning="Agent loop did not converge.",
-        recommended_action="Manual investigation required.",
-        action_type="human_escalate",
-        requires_human_review=True,
-        estimated_blast_radius="service",
-    )
-    await human_escalator.escalate(redis, domain="k8s", diagnosis=diagnosis, signals=signals, why=reason)
-
-
 async def run_incident(
     anthropic_client: AsyncAnthropic,
     redis: Redis,
@@ -503,20 +487,11 @@ async def run_incident(
     """
     Run the agentic tool-use loop for one incident.
 
-    Returns the outcome string from finish_incident (or a fallback status if
-    the loop did not converge within MAX_ITERATIONS).
+    Performs the K8s-specific context setup (API clients), then delegates the
+    domain-agnostic iterate / dispatch / finish / auto-escalate loop to
+    run_tool_loop. Returns the outcome string from finish_incident (or a
+    fallback status if the loop did not converge within MAX_ITERATIONS).
     """
-    node_names = {s.resource_id for s in bundle.signals}
-    logger.info(
-        "agent_loop_started",
-        incident_id=incident_id,
-        signal_count=len(bundle.signals),
-        nodes=list(node_names),
-        learning_mode=learning_mode,
-    )
-
-    messages: list[dict] = [{"role": "user", "content": _format_bundle(bundle)}]
-
     await _load_k8s_config()
     async with client.ApiClient() as api:
         ctx = {
@@ -529,77 +504,17 @@ async def run_incident(
             "policy_v1": client.PolicyV1Api(api),
         }
 
-        for iteration in range(1, MAX_ITERATIONS + 1):
-            response = await anthropic_client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=2048,
-                system=[
-                    {
-                        "type": "text",
-                        "text": _SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-                messages=messages,
-                tools=TOOLS,
-            )
-            messages.append({"role": "assistant", "content": response.content})
-
-            finish_input: dict | None = None
-            tool_results: list[dict] = []
-
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-
-                if block.name == "finish_incident":
-                    finish_input = block.input
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": "acknowledged",
-                    })
-                    continue
-
-                try:
-                    result = await _dispatch_tool(block.name, block.input, ctx)
-                except Exception as exc:
-                    logger.error("agent_tool_error", incident_id=incident_id, tool=block.name, error=str(exc))
-                    result = {"error": str(exc)}
-
-                logger.info(
-                    "agent_tool_call",
-                    incident_id=incident_id,
-                    iteration=iteration,
-                    tool=block.name,
-                    tool_input=block.input,
-                    result=result,
-                )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result),
-                })
-
-            if finish_input is not None:
-                outcome = finish_input.get("outcome", "unknown")
-                logger.info(
-                    "agent_finished",
-                    incident_id=incident_id,
-                    iteration=iteration,
-                    outcome=outcome,
-                    summary=finish_input.get("summary", ""),
-                )
-                await _log_action(redis, incident_id, "k8s", "agent_finish", outcome, 0.0, finish_input.get("summary", ""))
-                return outcome
-
-            if not tool_results:
-                # Claude responded with text only and didn't call finish_incident.
-                logger.warning("agent_no_tool_call", incident_id=incident_id, iteration=iteration)
-                break
-
-            messages.append({"role": "user", "content": tool_results})
-
-    logger.warning("agent_max_iterations", incident_id=incident_id, max_iterations=MAX_ITERATIONS)
-    await _escalate_unresolved(redis, bundle.signals, "agent loop exceeded max iterations without resolution")
-    return "max_iterations_reached"
+        return await run_tool_loop(
+            anthropic_client,
+            redis,
+            bundle,
+            incident_id,
+            system_prompt=_SYSTEM_PROMPT,
+            tools=TOOLS,
+            dispatch_tool=_dispatch_tool,
+            format_bundle=_format_bundle,
+            ctx=ctx,
+            domain="k8s",
+            learning_mode=learning_mode,
+            max_iterations=MAX_ITERATIONS,
+        )
