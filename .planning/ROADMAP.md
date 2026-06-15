@@ -24,7 +24,15 @@ Atoloan Monitor is built in four dependency-ordered phases. Phase 1 lays the eve
   4. Postgres observer queries the application database using a connection pool of at most 3 connections with `application_name='atoloan-monitor'`, and the PostgreSQL `superuser_reserved_connections` slot is reserved — the monitoring agent cannot consume application connection budget
   5. Learning mode is active: no alerts fire, no remediation actions execute, and the system logs a contamination flag when a K8s rolling update or node eviction is in progress — contaminated baseline windows are excluded from the computed baseline
   6. After 7 days of learning mode, per-metric EWMA baselines and pinned reference baseline snapshots exist in the monitoring database for all observed metrics; the system transitions to Enforcement mode automatically and logs the transition event
-**Plans**: TBD
+**Sub-scope (this planning round)**: Generic-monitor framework refactor (CONTEXT.md D-01..D-16) — generalize the existing K8s node monitor into a registry-based observer/orchestrator/skill framework. Migrates OBS-02 behavior-preserving and ships the ADDING-A-MONITOR.md recipe; INFRA-01..06 and OBS-01/03..08 remain Pending for future phases.
+**Plans**: 6 plans (6 waves)
+Plans:
+- [ ] 01-01-PLAN.md — Wave 0: pytest harness + baseline tests capturing CURRENT behavior
+- [ ] 01-02-PLAN.md — D-03/D-04/D-05: extract shared remediation primitives (domain-keyed THRESHOLDS)
+- [ ] 01-03-PLAN.md — D-06/D-07/D-08/D-09: extract diagnoser_base + agent_loop shared modules
+- [ ] 01-04-PLAN.md — D-10/D-11/D-12/D-13: DomainConfig registry + generic orchestrator + per-domain urgency
+- [ ] 01-05-PLAN.md — D-01/D-02: open action_type to str + safety-floor regression (checkpoint)
+- [ ] 01-06-PLAN.md — D-14/D-15/D-16: registry-driven runner + ADDING-A-MONITOR.md + e2e checkpoint
 
 ### Phase 2: Diagnosis and SLO Engine
 **Goal**: The agent diagnoses infrastructure incidents using correlated multi-layer signals, anomaly detection against dual baselines, and multi-window SLO burn rate calculation — confidence-scored DiagnosisResult objects are produced for every aggregated signal bundle but no automated actions are taken yet
