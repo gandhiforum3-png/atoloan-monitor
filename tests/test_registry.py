@@ -7,9 +7,32 @@ the exact 4-entry urgency map (the node_network_unavailable gap preserved), and
 that every wired callable is present.
 """
 
+import importlib.util
+import os
+
+import pytest
+
 import agent.orchestrators.k8s_orchestrator  # noqa: F401 — triggers registration
 
 from agent.registry import REGISTRY
+
+
+def _load_run_local():
+    """Import scripts/run_local.py as a module so we can unit-test parse_monitors.
+
+    scripts/ isn't a package; load it by file path. The module's top-level
+    `sys.path.insert(...)` + registration imports run on load, which also
+    guarantees the k8s domain is registered.
+    """
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(here, "scripts", "run_local.py")
+    spec = importlib.util.spec_from_file_location("run_local", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+run_local = _load_run_local()
 
 
 def test_k8s_domain_registered():
@@ -53,3 +76,37 @@ def test_k8s_callables_wired():
     assert callable(cfg.remediate)
     assert callable(cfg.run_incident)
     assert callable(cfg.context_fetcher)
+
+
+# --- run_local.py --monitors parsing (D-14) -------------------------------
+
+
+def test_parse_monitors_none_returns_all_registered():
+    # Default (no --monitors) -> every registered domain, so the runner
+    # auto-starts each newly registered DomainConfig with no flag change.
+    assert run_local.parse_monitors(None) == list(REGISTRY.keys())
+    assert "k8s" in run_local.parse_monitors(None)
+
+
+def test_parse_monitors_single_domain():
+    assert run_local.parse_monitors("k8s") == ["k8s"]
+
+
+def test_parse_monitors_strips_whitespace_and_empty_entries():
+    # "k8s, " tolerates whitespace and trailing empty comma segments.
+    assert run_local.parse_monitors(" k8s , ") == ["k8s"]
+
+
+def test_parse_monitors_empty_string_returns_all():
+    assert run_local.parse_monitors("") == list(REGISTRY.keys())
+
+
+def test_parse_monitors_unknown_domain_exits(capsys):
+    # T-01-17: an unknown --monitors domain must fail loud (sys.exit(1) with the
+    # available list), never silently no-op.
+    with pytest.raises(SystemExit) as exc:
+        run_local.parse_monitors("nope")
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "unknown monitor domain" in out
+    assert "k8s" in out  # available list shown
