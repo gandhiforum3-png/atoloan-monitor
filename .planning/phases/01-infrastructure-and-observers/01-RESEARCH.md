@@ -454,19 +454,22 @@ The loop: `messages.create(..., tools=TOOLS)` → append assistant content → f
 
 **Note:** No external/web sources were consulted because this is a closed-world internal refactor. All technical claims are VERIFIED against the actual files read this session or VERIFIED by running pydantic locally; the few `[ASSUMED]` items above are test-tooling version details and a design-discretion field, all low-risk.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the diagnoser re-inject a per-domain `enum` into the tool schema after D-01?**
    - What we know: opening the model removes the API enum constraint (VERIFIED); the system prompt still lists valid actions; the boundary safely escalates unknowns.
    - What's unclear: whether the team wants belt-and-suspenders API enforcement per-domain (derive enum from `THRESHOLDS[domain].keys()`).
    - Recommendation: implement the boundary check (required by D-01) and add an optional per-domain enum injection in `diagnose_with_claude` if `result_model` exposes domain actions — but don't block on it. Note for discuss-phase.
+   - **RESOLVED:** 01-05-PLAN.md implements per-domain enum re-injection in `diagnose_with_claude` alongside the D-01 boundary check.
 
 2. **Fate of `k8s_orchestrator.py` (D-12 Claude's discretion: keep/rename/merge).**
    - What we know: only `_fetch_pods_on_nodes` + the K8s `DomainConfig` registration need a home.
    - Recommendation: keep the file (renamed conceptually to "k8s domain wiring"): `_fetch_pods_on_nodes` + the `register(DomainConfig(...))` call. Simplest, lowest churn, keeps `REMEDIATION-APPROACHES.md` references mostly valid. Update that doc's module references (D-12 / CONTEXT note about keeping it accurate).
+   - **RESOLVED:** 01-04-PLAN.md keeps `k8s_orchestrator.py` as the K8s domain-wiring file (`_fetch_pods_on_nodes` + `DomainConfig` registration).
 
 3. **Does the `escalate` summary string ("node signal(s)") get genericized now?** (human_escalator:67)
    - Recommendation: parameterize minimally (`f"{len(signals)} {domain} signal(s)"`) — tiny change, clearly an improvement for genericity, but flag it as an intentional (cosmetic) behavior change so verify-work doesn't treat differing summary text as a regression.
+   - **RESOLVED:** 01-04-PLAN.md genericizes the summary string to `f"{len(signals)} {domain} signal(s)"`, documented as an intentional cosmetic change.
 
 ## Environment Availability
 
