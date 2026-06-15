@@ -6,11 +6,10 @@ a structured DiagnosisResult. Uses prompt caching for the static
 infrastructure topology so repeated calls in a session hit the cache.
 """
 
-import json
-
 import structlog
 from anthropic import AsyncAnthropic
 
+from agent.shared.diagnoser_base import diagnose_with_claude
 from agent.shared.models import DiagnosisResult, SignalBundle
 
 logger = structlog.get_logger()
@@ -118,44 +117,9 @@ async def diagnose(
         pod_context_count=len(pods_on_node),
     )
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=[
-            {
-                "type": "text",
-                "text": _SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},  # cached across calls
-            }
-        ],
-        messages=[{"role": "user", "content": user_text}],
-        tools=[
-            {
-                "name": "submit_diagnosis",
-                "description": "Submit the completed RCA diagnosis for these node conditions",
-                "input_schema": DiagnosisResult.model_json_schema(),
-            }
-        ],
-        tool_choice={"type": "tool", "name": "submit_diagnosis"},
+    return await diagnose_with_claude(
+        client,
+        _SYSTEM_PROMPT,
+        user_text,
+        tool_description="Submit the completed RCA diagnosis for these node conditions",
     )
-
-    cache_info = {
-        "input_tokens": response.usage.input_tokens,
-        "cache_read": getattr(response.usage, "cache_read_input_tokens", 0),
-        "cache_write": getattr(response.usage, "cache_creation_input_tokens", 0),
-        "output_tokens": response.usage.output_tokens,
-    }
-    logger.info("diagnoser_tokens", **cache_info)
-
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "submit_diagnosis":
-            result = DiagnosisResult.model_validate(block.input)
-            logger.info(
-                "diagnoser_complete",
-                confidence=result.confidence,
-                action_type=result.action_type,
-                blast_radius=result.estimated_blast_radius,
-            )
-            return result
-
-    raise RuntimeError("Claude did not return a submit_diagnosis tool call")
