@@ -15,6 +15,7 @@ import pytest
 import agent.orchestrators.k8s_orchestrator  # noqa: F401 — triggers k8s registration
 from agent.orchestrators.generic_orchestrator import _should_escalate
 from agent.registry import REGISTRY
+from agent.shared.remediation import _meets_threshold
 
 _ESCALATE_BELOW = REGISTRY["k8s"].escalate_below
 
@@ -38,6 +39,38 @@ def test_should_escalate_routing(make_diagnosis, kwargs, expected_escalate):
     assert isinstance(reason, str)
 
 
-# Note: do NOT test an unknown/novel action_type here — the CURRENT model is a
-# Literal and pydantic rejects it; that case moves to plan 01-05 after D-01
-# opens the action_type field.
+def test_novel_action_type_below_floor_escalates(make_diagnosis):
+    # Post-D-01 (plan 01-05): action_type is an open str, so a novel action the
+    # old Literal would have rejected now validates at the model layer. At the
+    # routing layer an unregistered action has no escalate_below entry, so the
+    # default floor (0.80) applies — a below-floor novel action escalates.
+    diagnosis = make_diagnosis(
+        action_type="reboot_node",
+        confidence=0.50,
+        requires_human_review=False,
+    )
+    escalate, reason = _should_escalate(diagnosis, _ESCALATE_BELOW)
+    assert escalate is True
+    assert isinstance(reason, str)
+
+
+def test_novel_action_type_never_executes_at_threshold_gate(make_diagnosis):
+    # [Rule 1 - corrected plan assertion] The plan's <behavior> claimed
+    # _should_escalate(reboot_node@0.99, ...) -> True, but the real wired
+    # escalate_below defaults an unknown action to the 0.80 floor, so a HIGH
+    # confidence (0.99) novel action does NOT escalate at the routing layer.
+    # The actual backstop that guarantees "novel action NEVER executes" is the
+    # execution threshold gate (THRESHOLDS two-level .get default 1.0): an
+    # unknown action can never meet the threshold, so remediate() returns
+    # "threshold_not_met" without acting. We assert that true boundary here
+    # (matches the plan key_link: _meets_threshold returns False -> never executes).
+    assert _meets_threshold("k8s", "reboot_node", 0.99) is False
+    # The routing layer passes a high-confidence novel action through (no floor),
+    # which is precisely why the threshold gate must be the hard backstop.
+    diagnosis = make_diagnosis(
+        action_type="reboot_node",
+        confidence=0.99,
+        requires_human_review=False,
+    )
+    escalate, _ = _should_escalate(diagnosis, _ESCALATE_BELOW)
+    assert escalate is False  # documents that routing alone does NOT contain it

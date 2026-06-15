@@ -28,6 +28,7 @@ async def diagnose_with_claude(
     max_tokens: int = 2048,
     tool_name: str = "submit_diagnosis",
     tool_description: str = "Submit the completed RCA diagnosis",
+    input_schema: dict | None = None,
 ) -> BaseModel:
     """
     Make a single forced-tool_choice Claude call and return the parsed result.
@@ -46,6 +47,12 @@ async def diagnose_with_claude(
         max_tokens:       Max output tokens.
         tool_name:        Name of the forced tool.
         tool_description: Description shown to Claude for the forced tool.
+        input_schema:     Optional explicit tool input schema. Defaults to
+                          ``result_model.model_json_schema()``. A domain whose
+                          result model uses an OPEN action_type str (post-D-01)
+                          passes an enum-reinjected schema here so its Claude call
+                          stays API-constrained to that domain's known actions
+                          while the shared model stays open.
 
     Returns:
         An instance of ``result_model`` parsed from the tool_use block.
@@ -68,7 +75,9 @@ async def diagnose_with_claude(
             {
                 "name": tool_name,
                 "description": tool_description,
-                "input_schema": result_model.model_json_schema(),
+                "input_schema": input_schema
+                if input_schema is not None
+                else result_model.model_json_schema(),
             }
         ],
         tool_choice={"type": "tool", "name": tool_name},

@@ -1,8 +1,10 @@
-"""Baseline: DiagnosisResult schema against CURRENT agent.shared.models.
+"""DiagnosisResult schema — post-D-01 (action_type opened to an open str).
 
-The CURRENT schema has an enum (action_type is a Literal). Plan 01-05 will
-replace this test's enum assertion when action_type opens to str. Also pins
-confidence bounds (ge=0.0, le=1.0).
+D-01/D-02 (plan 01-05) intentionally FLIPPED the original baseline expectation:
+the shared model's JSON schema no longer carries an action_type enum (it was a
+closed Literal before). A novel action_type now validates at the model layer;
+the boundary (threshold + safety_check) is what contains it. Confidence bounds
+(ge=0.0, le=1.0) are unchanged.
 """
 
 import pytest
@@ -27,17 +29,20 @@ def _valid_kwargs(**overrides):
     return base
 
 
-def test_current_schema_has_action_type_enum():
+def test_schema_action_type_has_no_enum():
+    # FLIPPED by D-01: the prior baseline asserted `"enum" in ...`; the shared
+    # model's action_type is now an open str, so its JSON schema must carry NO
+    # enum key. Per-domain diagnosers re-inject their own enum into their tool
+    # input_schema; the shared model stays open.
     schema = DiagnosisResult.model_json_schema()
-    # CURRENT schema has enum (Literal); plan 01-05 will replace this assertion
-    # when action_type opens to str.
-    assert "enum" in schema["properties"]["action_type"]
-    assert set(schema["properties"]["action_type"]["enum"]) == {
-        "pod_restart",
-        "deployment_scale_down",
-        "human_escalate",
-        "observe_only",
-    }
+    assert "enum" not in schema["properties"]["action_type"]
+    assert schema["properties"]["action_type"]["type"] == "string"
+
+
+def test_novel_action_type_validates():
+    # Post-D-01: a novel action_type the old Literal forbade now constructs fine.
+    result = DiagnosisResult(**_valid_kwargs(action_type="reboot_node"))
+    assert result.action_type == "reboot_node"
 
 
 def test_valid_construct_works():

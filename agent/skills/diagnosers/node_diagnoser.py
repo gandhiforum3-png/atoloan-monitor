@@ -14,6 +14,22 @@ from agent.shared.models import DiagnosisResult, SignalBundle
 
 logger = structlog.get_logger()
 
+# This domain's known action vocabulary. After D-01 opened DiagnosisResult.action_type
+# to an open str, the shared model's JSON schema no longer carries an enum. We re-inject
+# THIS domain's enum into the tool input_schema below (belt-and-suspenders per research
+# Open Question 1) so the Claude API call for node diagnosis stays constrained to the 4
+# known k8s actions — without re-closing the shared model for every other domain. The
+# boundary (threshold + safety_check) remains the real defense.
+_K8S_ACTION_TYPES = ["pod_restart", "deployment_scale_down", "human_escalate", "observe_only"]
+
+
+def _tool_input_schema() -> dict:
+    """DiagnosisResult schema with this domain's action_type enum re-injected."""
+    schema = DiagnosisResult.model_json_schema()
+    schema["properties"]["action_type"]["enum"] = list(_K8S_ACTION_TYPES)
+    return schema
+
+
 # Cached across all calls in a session — only re-tokenized when the system prompt changes.
 _SYSTEM_PROMPT = """\
 You are an expert SRE diagnosing Kubernetes node infrastructure incidents for Atoloan.
@@ -122,4 +138,5 @@ async def diagnose(
         _SYSTEM_PROMPT,
         user_text,
         tool_description="Submit the completed RCA diagnosis for these node conditions",
+        input_schema=_tool_input_schema(),  # re-inject per-domain enum (D-01 backstop)
     )

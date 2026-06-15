@@ -45,9 +45,15 @@ class DiagnosisResult(BaseModel):
     )
     confidence_reasoning: str = Field(description="Why you chose this confidence score")
     recommended_action: str = Field(description="Specific remediation step in plain English")
-    action_type: Literal[
-        "pod_restart", "deployment_scale_down", "human_escalate", "observe_only"
-    ] = Field(description="Machine-readable action category")
+    # D-01/D-02: action_type is an OPEN str (was a closed 4-value Literal). This
+    # deliberately removes the JSON-schema enum from the shared model so future
+    # domains (EC2 reboot_instance, Postgres kill_query) can express valid actions
+    # the Literal forbade. The boundary (threshold + safety_check) is the hard
+    # backstop: unknown actions never meet _meets_threshold -> escalate (never
+    # execute), and FORBIDDEN_OPERATIONS still blocks destructive ops. Per-domain
+    # diagnosers re-inject their own enum into their tool input_schema to keep the
+    # Claude API call API-constrained (see node_diagnoser).
+    action_type: str = Field(description="Machine-readable action category")
     requires_human_review: bool
     estimated_blast_radius: Literal["service", "cluster", "datacenter"]
 
