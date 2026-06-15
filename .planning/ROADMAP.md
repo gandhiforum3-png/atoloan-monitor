@@ -32,7 +32,7 @@ Plans:
 - [x] 01-03-PLAN.md — D-06/D-07/D-08/D-09: extract diagnoser_base + agent_loop shared modules
 - [x] 01-04-PLAN.md — D-10/D-11/D-12/D-13: DomainConfig registry + generic orchestrator + per-domain urgency
 - [x] 01-05-PLAN.md — D-01/D-02: open action_type to str + safety-floor regression (checkpoint)
-- [ ] 01-06-PLAN.md — D-14/D-15/D-16: registry-driven runner + ADDING-A-MONITOR.md + e2e checkpoint
+- [x] 01-06-PLAN.md — D-14/D-15/D-16: registry-driven runner + ADDING-A-MONITOR.md + e2e checkpoint (live e2e deferred — see 01-VERIFICATION.md)
 
 ### Phase 2: Diagnosis and SLO Engine
 **Goal**: The agent diagnoses infrastructure incidents using correlated multi-layer signals, anomaly detection against dual baselines, and multi-window SLO burn rate calculation — confidence-scored DiagnosisResult objects are produced for every aggregated signal bundle but no automated actions are taken yet
@@ -78,7 +78,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Infrastructure and Observers | 5/6 | In Progress|  |
+| 1. Infrastructure and Observers | 6/6 | Sub-scope complete (framework refactor); 8-observer learning-mode goal remains open |  |
 | 2. Diagnosis and SLO Engine | 0/TBD | Not started | - |
 | 3. Safe Remediation | 0/TBD | Not started | - |
 | 4. Dashboard and Incident Docs | 0/TBD | Not started | - |
