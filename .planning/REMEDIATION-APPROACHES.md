@@ -4,12 +4,27 @@
 > `scripts/run_local.py`. Every component referenced here is real — sourced
 > directly from the codebase.
 
-There are two ways `k8s_orchestrator` can turn a node-condition signal into a
+There are two ways the orchestrator can turn a node-condition signal into a
 diagnosis and (optionally) an action. They share the same front half of the
-pipeline and diverge at the diagnosis/remediation stage. Switch between them
-with `mode="diagnoser"` (default) or `mode="agent"` in
-`agent/orchestrators/k8s_orchestrator.py::run()`, or via
-`scripts/run_local.py --agent`.
+pipeline and diverge at the diagnosis/remediation stage.
+
+> **Post-refactor module layout (Phase 1, D-01..D-16).** The generic
+> consume/debounce/bundle/dispatch loop now lives in
+> `agent/orchestrators/generic_orchestrator.py::run(redis, client, config, *,
+> debounce_seconds, learning_mode, mode)` and is driven by a `DomainConfig` from
+> `agent/registry.py`. `agent/orchestrators/k8s_orchestrator.py` now keeps only
+> `_fetch_pods_on_nodes` (the k8s context fetcher) + the single k8s `DomainConfig`
+> registration. The shared primitives moved to
+> `agent/shared/remediation.py` (`THRESHOLDS`, `_meets_threshold`, `_log_action`,
+> `PreflightResult`), `agent/shared/diagnoser_base.py` (`diagnose_with_claude`),
+> and `agent/shared/agent_loop.py` (`run_tool_loop`). Both `mode="diagnoser"`
+> (default) and `mode="agent"` are selected the same way as before.
+
+Switch between them with `mode="diagnoser"` (default) or `mode="agent"` passed to
+`agent/orchestrators/generic_orchestrator.py::run()` (via the k8s `DomainConfig`),
+or via `scripts/run_local.py --agent`. The runner is registry-driven: it iterates
+`agent.registry.REGISTRY` and starts one observer + one generic-orchestrator per
+domain (use `--monitors k8s` to run only the k8s domain).
 
 ---
 
@@ -34,9 +49,10 @@ with `mode="diagnoser"` (default) or `mode="agent"` in
               ▼
 ┌───────────────────────────┐
 │ agent/orchestrators/      │   Consumer group reads events:k8s,
-│ k8s_orchestrator.py       │   collects them for `debounce_seconds`
-│ run() → debounce loop     │   (5s locally, 30s prod) into a
-└─────────────┬─────────────┘   SignalBundle
+│ generic_orchestrator.py   │   collects them for `debounce_seconds`
+│ run(config) → debounce    │   (5s locally, 30s prod) into a
+│ loop                      │   SignalBundle. Driven by the k8s
+└─────────────┬─────────────┘   DomainConfig from agent/registry.py.
               │ window elapses
               ▼
      _handle_bundle(bundle, mode=...)
