@@ -1,0 +1,6 @@
+anthropic>=0.40.0
+kubernetes-asyncio>=30.0.0
+redis[asyncio]>=5.0.0
+pydantic>=2.0.0
+structlog>=24.0.0
+python-dotenv>=1.0.0
