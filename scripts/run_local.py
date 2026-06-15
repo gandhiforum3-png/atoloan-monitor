@@ -39,8 +39,8 @@ import logging
 import os
 import sys
 
-import anthropic
 import structlog
+from langchain_anthropic import ChatAnthropic
 from redis.asyncio import Redis
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -182,7 +182,7 @@ async def main(
         print("  Start Redis first:\n    docker run -d --name atoloan-redis -p 6379:6379 redis:7-alpine\n")
         sys.exit(1)
 
-    anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
+    anthropic_client = ChatAnthropic(model="claude-sonnet-4-6", max_tokens=2048, api_key=api_key)
 
     print(
         f"[runner] Starting registry-driven pipeline "

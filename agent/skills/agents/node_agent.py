@@ -18,7 +18,7 @@ which uses node_diagnoser + node_remediator). Both paths can be run and compared
 """
 
 import structlog
-from anthropic import AsyncAnthropic
+from langchain_anthropic import ChatAnthropic
 from kubernetes_asyncio import client
 from kubernetes_asyncio.client import ApiException
 from redis.asyncio import Redis
@@ -477,7 +477,7 @@ async def _dispatch_tool(name: str, tool_input: dict, ctx: dict) -> dict:
 
 
 async def run_incident(
-    anthropic_client: AsyncAnthropic,
+    anthropic_client: ChatAnthropic,
     redis: Redis,
     bundle: SignalBundle,
     incident_id: str,

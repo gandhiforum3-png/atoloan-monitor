@@ -7,7 +7,7 @@ infrastructure topology so repeated calls in a session hit the cache.
 """
 
 import structlog
-from anthropic import AsyncAnthropic
+from langchain_anthropic import ChatAnthropic
 
 from agent.shared.diagnoser_base import diagnose_with_claude
 from agent.shared.models import DiagnosisResult, SignalBundle
@@ -114,7 +114,7 @@ def _format_bundle(bundle: SignalBundle, pods_on_node: list[dict]) -> str:
 
 
 async def diagnose(
-    client: AsyncAnthropic,
+    client: ChatAnthropic,
     bundle: SignalBundle,
     pods_on_node: list[dict],
 ) -> DiagnosisResult:
@@ -122,7 +122,7 @@ async def diagnose(
     Call Claude Sonnet and return a structured DiagnosisResult.
 
     Args:
-        client:        Async Anthropic client.
+        client:        ChatAnthropic client.
         bundle:        Signal bundle from the orchestrator.
         pods_on_node:  Pod metadata for pods running on the affected nodes.
     """

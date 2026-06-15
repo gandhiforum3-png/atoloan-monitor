@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import structlog
-from anthropic import AsyncAnthropic
+from langchain_anthropic import ChatAnthropic
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
@@ -80,7 +80,7 @@ def _decode_event(msg_id: bytes, fields: dict, domain: str) -> InfraEvent:
 
 async def _handle_bundle(
     redis: Redis,
-    anthropic_client: AsyncAnthropic,
+    anthropic_client: ChatAnthropic,
     config: DomainConfig,
     bundle: SignalBundle,
     *,
@@ -139,7 +139,7 @@ async def _handle_bundle(
 
 async def run(
     redis: Redis,
-    anthropic_client: AsyncAnthropic,
+    anthropic_client: ChatAnthropic,
     config: DomainConfig,
     *,
     debounce_seconds: int = 30,
@@ -152,7 +152,7 @@ async def run(
 
     Args:
         redis:             Connected async Redis client.
-        anthropic_client:  Async Anthropic client (reads ANTHROPIC_API_KEY from env).
+        anthropic_client:  ChatAnthropic client (reads ANTHROPIC_API_KEY from env by default).
         config:            DomainConfig describing the domain (stream, group, callables,
                            threshold/urgency maps, optional context fetcher).
         debounce_seconds:  Aggregate signals for this many seconds before diagnosing.
