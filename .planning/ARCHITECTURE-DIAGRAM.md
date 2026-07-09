@@ -14,12 +14,12 @@ YOUR LAPTOP
   ┌─────────────────────────────────────────────────────────────────┐
   │  Vite Dev Server   (node:22)                                    │
   │  URL:  http://localhost:5173                                    │
-  │  Cmd:  cd atoloan-ui && npm run dev                            │
+  │  Cmd:  cd atoloan-ui && npm run dev                             │
   │                                                                 │
-  │  Hot-reload: edit a .tsx file → browser updates instantly      │
-  │  VITE_API_URL=http://127.0.0.1:8000  (.env.development)        │
+  │  Hot-reload: edit a .tsx file → browser updates instantly       │
+  │  VITE_API_URL=http://127.0.0.1:8000  (.env.development)         │
   │                                                                 │
-  │  React 19 app (TypeScript source, NOT built/bundled)           │
+  │  React 19 app (TypeScript source, NOT built/bundled)            │
   └─────────────────────┬───────────────────────────────────────────┘
                         │  API calls to http://127.0.0.1:8000
                         ▼
@@ -27,18 +27,18 @@ YOUR LAPTOP
   Terminal 2: Backend
   ┌─────────────────────────────────────────────────────────────────┐
   │  uvicorn  (FastAPI, Python 3.12)                                │
-  │  URL:  http://127.0.0.1:8000                                   │
-  │  Cmd:  uvicorn app.main:app --reload --port 8000               │
+  │  URL:  http://127.0.0.1:8000                                    │
+  │  Cmd:  uvicorn app.main:app --reload --port 8000                │
   │                                                                 │
-  │  --reload flag: edit a .py file → server restarts instantly    │
-  │  Reads secrets from: .env file (NOT AWS Secrets Manager)       │
+  │  --reload flag: edit a .py file → server restarts instantly     │
+  │  Reads secrets from: .env file (NOT AWS Secrets Manager)        │
   │                                                                 │
   │  .env file contains:                                            │
   │    PGHOST=localhost   PGPORT=5432                               │
   │    PGUSER=atoloan     PGPASSWORD=atoloan                        │
   │    PGDATABASE=atoloan                                           │
   │    ANTHROPIC_API_KEY=sk-ant-...                                 │
-  │    SEVENCREDIT_ACCOUNT=...  (test env)                         │
+  │    SEVENCREDIT_ACCOUNT=...  (test env)                          │
   └─────────────────────┬───────────────────────────────────────────┘
                         │  asyncpg connection to localhost:5432
                         ▼
@@ -49,14 +49,14 @@ YOUR LAPTOP
   │  Cmd: docker-compose up                                         │
   │                                                                 │
   │  Starts TWO containers:                                         │
-  │  ┌──────────────────┐    ┌──────────────────────────────────┐  │
+  │  ┌───────────────────┐    ┌──────────────────────────────────┐  │
   │  │ postgres:16-alpine│    │  atoloan-api  (built from        │  │
   │  │ port: 5432        │    │  Dockerfile)                     │  │
   │  │ user: atoloan     │◄───│  port: 8000                      │  │
   │  │ db:   atoloan     │    │  PGHOST=db (docker network)      │  │
   │  │ volume: postgres_ │    └──────────────────────────────────┘  │
-  │  │         data      │                                           │
-  │  └──────────────────┘                                           │
+  │  │         data      │                                          │
+  │  └───────────────────┘                                          │
   │                                                                 │
   │  OPTION B — local Postgres (already installed)                  │
   │  psql -U postgres -c "CREATE DATABASE atoloan;"                 │
@@ -130,51 +130,51 @@ Infrastructure    Nothing to provision         Terraform manages all AWS resourc
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    AWS VPC  (10.2.0.0/16)  us-east-2                 │
 │                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Public Subnet A  (10.2.1.0/24)  us-east-2a                 │    │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │  Public Subnet A  (10.2.1.0/24)  us-east-2a                  │    │
 │  │                                                              │    │
-│  │  ┌─────────────────────────────────────────────────────┐    │    │
-│  │  │  EC2: atoloan-k8s-prod-server  (t3.small)           │    │    │
-│  │  │  Elastic IP ← Route 53 A records point here         │    │    │
+│  │  ┌──────────────────────────────────────────────────────┐    │    │
+│  │  │  EC2: atoloan-k8s-prod-server  (t3.small)            │    │    │
+│  │  │  Elastic IP ← Route 53 A records point here          │    │    │
 │  │  │                                                      │    │    │
 │  │  │  Runs:  k3s SERVER  (Kubernetes control plane)       │    │    │
 │  │  │         ingress-nginx  (entry point for HTTP/HTTPS)  │    │    │
 │  │  │         cert-manager   (free TLS from Let's Encrypt) │    │    │
 │  │  │         external-secrets operator                    │    │    │
 │  │  │                                                      │    │    │
-│  │  │  Storage: 20 GB gp3  +  2 GB swap                   │    │    │
-│  │  └─────────────────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────┘    │
+│  │  │  Storage: 20 GB gp3  +  2 GB swap                    │    │    │
+│  │  └──────────────────────────────────────────────────────┘    │    │
+│  └──────────────────────────────────────────────────────────────┘    │
 │                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Public Subnet B  (10.2.2.0/24)  us-east-2b                 │    │
-│  │                                                              │    │
-│  │  ┌─────────────────────────────────────────────────────┐    │    │
-│  │  │  EC2: atoloan-k8s-prod-agent  (t3.small)            │    │    │
-│  │  │                                                      │    │    │
-│  │  │  Runs:  k3s AGENT  (Kubernetes worker node)         │    │    │
-│  │  │         Pods are scheduled here by k3s              │    │    │
-│  │  │                                                      │    │    │
-│  │  │  Storage: 20 GB gp3  +  2 GB swap                   │    │    │
-│  │  └─────────────────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  Public Subnet B  (10.2.2.0/24)  us-east-2b                 │     │
+│  │                                                             │     │
+│  │  ┌─────────────────────────────────────────────────────┐    │     │
+│  │  │  EC2: atoloan-k8s-prod-agent  (t3.small)            │    │     │
+│  │  │                                                     │    │     │
+│  │  │  Runs:  k3s AGENT  (Kubernetes worker node)         │    │     │
+│  │  │         Pods are scheduled here by k3s              │    │     │
+│  │  │                                                     │    │     │
+│  │  │  Storage: 20 GB gp3  +  2 GB swap                   │    │     │
+│  │  └─────────────────────────────────────────────────────┘    │     │
+│  └─────────────────────────────────────────────────────────────┘     │
 │                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Private Subnet A  (10.2.10.0/24)  us-east-2a               │    │
-│  │  Private Subnet B  (10.2.11.0/24)  us-east-2b               │    │
-│  │                                                              │    │
-│  │  ┌─────────────────────────────────────────────────────┐    │    │
-│  │  │  AWS RDS  PostgreSQL 16  (db.t4g.micro)             │    │    │
-│  │  │  Name: atoloan-postgres-prod                        │    │    │
-│  │  │  DB:   atoloandb                                    │    │    │
-│  │  │  DNS:  postgres.atoloans.com  (Route 53 CNAME)      │    │    │
-│  │  │                                                      │    │    │
-│  │  │  NOT publicly accessible — only k3s nodes           │    │    │
-│  │  │  can connect (enforced by RDS security group)       │    │    │
-│  │  │  Storage: 20 GB gp3, encrypted, auto-scale to 100 GB│    │    │
-│  │  │  Deletion protection: ON  (can't terraform destroy) │    │    │
-│  │  └─────────────────────────────────────────────────────┘    │    │
-│  └─────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  Private Subnet A  (10.2.10.0/24)  us-east-2a               │     │
+│  │  Private Subnet B  (10.2.11.0/24)  us-east-2b               │     │
+│  │                                                             │     │
+│  │  ┌─────────────────────────────────────────────────────┐    │     │
+│  │  │  AWS RDS  PostgreSQL 16  (db.t4g.micro)             │    │     │
+│  │  │  Name: atoloan-postgres-prod                        │    │     │
+│  │  │  DB:   atoloandb                                    │    │     │
+│  │  │  DNS:  postgres.atoloans.com  (Route 53 CNAME)      │    │     │
+│  │  │                                                     │    │     │
+│  │  │  NOT publicly accessible — only k3s nodes           │    │     │
+│  │  │  can connect (enforced by RDS security group)       │    │     │
+│  │  │  Storage: 20 GB gp3, encrypted, auto-scale to 100 GB│    │     │
+│  │  │  Deletion protection: ON  (can't terraform destroy) │    │     │
+│  │  └─────────────────────────────────────────────────────┘    │     │
+│  └─────────────────────────────────────────────────────────────┘     │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -201,14 +201,14 @@ k3s CLUSTER
 │  └── cert-manager pod                                                  │
 │       • Automatically gets free TLS certificates from Let's Encrypt    │
 │       • ClusterIssuer: letsencrypt-prod                                │
-│       • Stores certs as K8s Secrets (atoloan-ui-tls, atoloan-api-tls) │
+│       • Stores certs as K8s Secrets (atoloan-ui-tls, atoloan-api-tls)  │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
 │  NAMESPACE: external-secrets   (system, installed by Helm)             │
 │  └── external-secrets-operator pod                                     │
 │       • Watches ExternalSecret resources                               │
-│       • Connects to AWS Secrets Manager using EC2 IAM role (no keys!) │
+│       • Connects to AWS Secrets Manager using EC2 IAM role (no keys!)  │
 │       • Creates real K8s Secrets that pods can use                     │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -222,14 +222,14 @@ k3s CLUSTER
 │                                                                        │
 │  Deployment: atoloan-ui                                                │
 │  ├── 1 replica                                                         │
-│  ├── Image: gandhiforum3/atoloan-ui:latest  (Docker Hub)              │
+│  ├── Image: gandhiforum3/atoloan-ui:latest  (Docker Hub)               │
 │  ├── Container: nginx serving static React build on port 80            │
-│  └── Resources: 100m CPU / 128Mi RAM request                          │
+│  └── Resources: 100m CPU / 128Mi RAM request                           │
 │                                                                        │
 │  Service: atoloan-ui  (ClusterIP, port 80)                             │
 │                                                                        │
-│  Ingress: atoloans.com, www.atoloans.com                              │
-│  └── TLS certificate: atoloan-ui-tls (managed by cert-manager)        │
+│  Ingress: atoloans.com, www.atoloans.com                               │
+│  └── TLS certificate: atoloan-ui-tls (managed by cert-manager)         │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -240,34 +240,34 @@ k3s CLUSTER
 │    Memory requests: 2Gi  limits: 4Gi                                   │
 │    Max pods: 10                                                        │
 │                                                                        │
-│  ExternalSecrets (pull from AWS Secrets Manager every 1 hour):        │
-│  ├── atoloan-postgres-secret  ← atoloan/postgres-prod                 │
-│  │     keys: PGUSER, PGPASSWORD, PGHOST, PGPORT, PGDATABASE          │
-│  ├── atoloan-openai-secret    ← atoloan/openai                        │
+│  ExternalSecrets (pull from AWS Secrets Manager every 1 hour):         │
+│  ├── atoloan-postgres-secret  ← atoloan/postgres-prod                  │
+│  │     keys: PGUSER, PGPASSWORD, PGHOST, PGPORT, PGDATABASE            │
+│  ├── atoloan-openai-secret    ← atoloan/openai                         │
 │  │     keys: OPENAI_API_KEY                                            │
-│  └── atoloan-sevencredit-secret ← atoloan/sevencredit                 │
+│  └── atoloan-sevencredit-secret ← atoloan/sevencredit                  │
 │        keys: SEVENCREDIT_ACCOUNT, SEVENCREDIT_PASSWORD, CLIENT_ID/SECRET│
 │                                                                        │
 │  ConfigMap: atoloan-api-config                                         │
-│  └── APP_ENV=prod, SEVENCREDIT_ENV=prod                               │
-│      CORS_ORIGINS=https://atoloans.com,https://www.atoloans.com       │
+│  └── APP_ENV=prod, SEVENCREDIT_ENV=prod                                │
+│      CORS_ORIGINS=https://atoloans.com,https://www.atoloans.com        │
 │                                                                        │
 │  Deployment: atoloan-api                                               │
-│  ├── 2 replicas  (RollingUpdate: maxSurge=1, maxUnavailable=0)        │
-│  ├── Image: gandhiforum3/atoloan-api:latest  (Docker Hub)             │
-│  ├── InitContainer: db-migrate (runs migrations before API starts)    │
-│  ├── Container: uvicorn app.main:app on port 8000                     │
-│  ├── Resources: 300m CPU / 512Mi RAM request  |  1CPU / 1Gi limit     │
-│  ├── Readiness probe: GET /hello every 10s                            │
-│  ├── Liveness probe: GET /hello every 30s                             │
+│  ├── 2 replicas  (RollingUpdate: maxSurge=1, maxUnavailable=0)         │
+│  ├── Image: gandhiforum3/atoloan-api:latest  (Docker Hub)              │
+│  ├── InitContainer: db-migrate (runs migrations before API starts)     │
+│  ├── Container: uvicorn app.main:app on port 8000                      │
+│  ├── Resources: 300m CPU / 512Mi RAM request  |  1CPU / 1Gi limit      │
+│  ├── Readiness probe: GET /hello every 10s                             │
+│  ├── Liveness probe: GET /hello every 30s                              │
 │  └── Volumes:                                                          │
-│       ├── /app/upload_pdf  ← PVC: upload-pdfs (5Gi, local-path)      │
-│       └── /app/user_uploaded_documents ← PVC: user-docs (5Gi)        │
+│       ├── /app/upload_pdf  ← PVC: upload-pdfs (5Gi, local-path)        │
+│       └── /app/user_uploaded_documents ← PVC: user-docs (5Gi)          │
 │                                                                        │
-│  Service: atoloan-api  (ClusterIP, port 80 → 8000)                    │
+│  Service: atoloan-api  (ClusterIP, port 80 → 8000)                     │
 │                                                                        │
-│  Ingress: api.atoloans.com                                            │
-│  └── TLS certificate: atoloan-api-tls (managed by cert-manager)       │
+│  Ingress: api.atoloans.com                                             │
+│  └── TLS certificate: atoloan-api-tls (managed by cert-manager)        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
