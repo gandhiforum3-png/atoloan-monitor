@@ -1,0 +1,64 @@
+# values.yaml — every value here can be overridden per cluster with
+# `--set key=value` or a separate `-f my-values.yaml` at install time.
+# Nothing in the templates hardcodes a specific cluster, cloud, or registry.
+
+image:
+  repository: YOUR_REGISTRY/k8s-pod-observer   # build & push first, see README
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+namespace:
+  # Namespace the tool itself runs in. Does NOT limit which namespaces it can
+  # observe/remediate — that's controlled by rbac.scope below.
+  name: pod-observer
+  create: true
+
+rbac:
+  # cluster: can observe/remediate pods in every namespace (ClusterRole).
+  # namespace: restricted to namespace.name only (Role) — safer default for
+  # a first install on an unfamiliar cluster; widen once you trust it.
+  scope: cluster   # cluster | namespace
+
+anthropic:
+  # Preferred: reference a Secret that already exists (created outside Helm,
+  # e.g. via External Secrets Operator, Sealed Secrets, or `kubectl create secret`).
+  existingSecret: ""
+  existingSecretKey: "anthropic-api-key"
+  # Fallback: let the chart create the Secret directly from this value.
+  # Fine for a quick install; for anything long-lived prefer existingSecret.
+  apiKey: ""
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+
+probes:
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    failureThreshold: 2
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

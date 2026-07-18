@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-observer
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "pod-observer.labels" . | nindent 4 }}
+
+---
+{{- $kind := ternary "ClusterRole" "Role" (eq .Values.rbac.scope "cluster") }}
+{{- $bindingKind := ternary "ClusterRoleBinding" "RoleBinding" (eq .Values.rbac.scope "cluster") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ $kind }}
+metadata:
+  name: pod-observer
+  {{- if eq .Values.rbac.scope "namespace" }}
+  namespace: {{ .Values.namespace.name }}
+  {{- end }}
+  labels:
+    {{- include "pod-observer.labels" . | nindent 4 }}
+rules:
+  # Observation (read-only)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "nodes", "endpoints", "persistentvolumeclaims", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  # Remediation (write — scoped to exactly what the L1 runbook does)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]           # restart_pod
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["patch", "update"]  # rollback, scale, patch memory limit, force repull
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ $bindingKind }}
+metadata:
+  name: pod-observer
+  {{- if eq .Values.rbac.scope "namespace" }}
+  namespace: {{ .Values.namespace.name }}
+  {{- end }}
+  labels:
+    {{- include "pod-observer.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ $kind }}
+  name: pod-observer
+subjects:
+  - kind: ServiceAccount
+    name: pod-observer
+    namespace: {{ .Values.namespace.name }}

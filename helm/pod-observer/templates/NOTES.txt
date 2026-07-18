@@ -1,0 +1,21 @@
+pod-observer is deploying to namespace "{{ .Values.namespace.name }}".
+
+Check rollout status:
+  kubectl rollout status deployment/pod-observer -n {{ .Values.namespace.name }}
+
+Check it's ready (kubectl connectivity + API key both confirmed):
+  kubectl exec -n {{ .Values.namespace.name }} deploy/pod-observer -- curl -s localhost:8080/ready
+
+Port-forward to try it locally:
+  kubectl port-forward -n {{ .Values.namespace.name }} svc/pod-observer 8080:{{ .Values.service.port }}
+  curl -X POST localhost:8080/l1/diagnose \
+    -H 'Content-Type: application/json' \
+    -d '{"pod": "some-pod-name", "namespace": "default"}'
+
+RBAC scope: {{ .Values.rbac.scope }}
+{{- if eq .Values.rbac.scope "namespace" }}
+  This install can only see/act on namespace "{{ .Values.namespace.name }}".
+  Re-install with --set rbac.scope=cluster for cluster-wide observation.
+{{- else }}
+  This install can observe and remediate pods in every namespace.
+{{- end }}

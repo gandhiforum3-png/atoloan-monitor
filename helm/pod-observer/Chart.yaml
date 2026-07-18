@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pod-observer
+description: L1 Kubernetes pod observation, diagnosis, and remediation agent (Claude-powered)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - sre
+  - agent
+  - troubleshooting
