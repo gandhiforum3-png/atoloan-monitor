@@ -421,6 +421,15 @@ async def delete_stuck_pod(
 # Health verification (poll until Ready or timeout)
 # ---------------------------------------------------------------------------
 
+def _is_fully_ready(ready: str) -> bool:
+    """ready is 'N/M' (e.g. '2/2') from NamespacePod — true only when N == M and M > 0."""
+    try:
+        num, den = ready.split("/")
+        return den != "0" and num == den
+    except (ValueError, AttributeError):
+        return False
+
+
 async def verify_pod_healthy(
     pod_prefix: str,
     namespace: str = "default",
@@ -434,31 +443,17 @@ async def verify_pod_healthy(
     Use after restart_pod() — the new pod will have a different suffix.
     pod_prefix is matched against pod names (e.g. "api-deploy" matches "api-deploy-6b9df7-xzp2k").
     """
+    from pod_observer import get_namespace_pods
+
     deadline = time.monotonic() + timeout_s
 
     while time.monotonic() < deadline:
-        rc, out, _ = await asyncio.create_subprocess_exec(
-            "kubectl", "get", "pods", "-n", namespace,
-            "--no-headers", "-o",
-            "custom-columns=NAME:.metadata.name,READY:.status.conditions[?(@.type==\"Ready\")].status,PHASE:.status.phase",
-        ).__class__  # type: ignore
-
-        # Simpler: use kubectl get pods -o json and check
-        from pod_observer import get_namespace_pods
         pods = await get_namespace_pods(namespace)
-
         matching = [p for p in pods if p.name.startswith(pod_prefix)]
-        if matching:
-            healthy = [
-                p for p in matching
-                if p.phase == "Running" and p.ready.startswith(
-                    str(p.ready.split("/")[1])   # "2/2"
-                )
-            ]
-            # At least one matching pod is fully ready
-            ready_pods = [p for p in matching if p.phase == "Running"]
-            if ready_pods:
-                return True, f"Pod '{ready_pods[0].name}' is Running. Ready: {ready_pods[0].ready}"
+
+        ready_pods = [p for p in matching if p.phase == "Running" and _is_fully_ready(p.ready)]
+        if ready_pods:
+            return True, f"Pod '{ready_pods[0].name}' is Running. Ready: {ready_pods[0].ready}"
 
         await asyncio.sleep(poll_interval_s)
 

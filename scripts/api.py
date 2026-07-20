@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -28,6 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import pod_observer as obs
+import watcher
 from l1_runbook import run_l1_runbook
 from models import RunbookResult, NamespaceHealthReport, PodStatus
 
@@ -36,13 +38,24 @@ from models import RunbookResult, NamespaceHealthReport, PodStatus
 # App setup
 # ---------------------------------------------------------------------------
 
+API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+WATCHER_ENABLED = os.environ.get("WATCHER_ENABLED", "true").lower() == "true"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    if WATCHER_ENABLED:
+        watcher.start()
+    yield
+    watcher.stop()
+
+
 app = FastAPI(
     title="k8s-pod-observer",
     description="L1 Kubernetes pod observation and remediation service",
     version="1.0.0",
+    lifespan=_lifespan,
 )
-
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +121,30 @@ async def ready() -> ReadyResponse:
         kubectl_ok=kubectl_ok,
         api_key_set=api_key_set,
     )
+
+
+# ---------------------------------------------------------------------------
+# Watcher endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/watch/status", tags=["watch"])
+async def watch_status() -> dict:
+    """
+    Watcher loop status: whether the Kubernetes watch stream is connected,
+    how many pod events it has seen, and how many diagnoses it has triggered.
+    """
+    return watcher.status()
+
+
+@app.get("/watch/history", tags=["watch"])
+async def watch_history(limit: int = 50) -> dict:
+    """
+    Recent diagnoses the watcher triggered on its own (newest first), without
+    waiting for a manual /l1/diagnose call. Diagnosis-only — the watcher never
+    passes `deployment`, so nothing here was auto-remediated.
+    """
+    items = list(watcher.history)[:limit]
+    return {"count": len(items), "items": items}
 
 
 # ---------------------------------------------------------------------------

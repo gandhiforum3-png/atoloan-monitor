@@ -39,6 +39,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "pod-observer.secretName" . }}
                   key: {{ include "pod-observer.secretKey" . }}
+            - name: WATCHER_ENABLED
+              value: {{ .Values.watcher.enabled | quote }}
+            - name: WATCHER_COOLDOWN_SECONDS
+              value: {{ .Values.watcher.cooldownSeconds | quote }}
+            - name: WATCHER_HISTORY_SIZE
+              value: {{ .Values.watcher.historySize | quote }}
+            - name: WATCHER_ENABLE_REMEDIATION
+              value: {{ .Values.watcher.enableRemediation | quote }}
 
           livenessProbe:
             httpGet:

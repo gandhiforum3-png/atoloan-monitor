@@ -156,41 +156,35 @@ async def _generate_l2_actions(
             return _fallback_l2_actions(failure_class)
 
         steps_text = "\n".join(
-            f"  Step {s.step_num}: [{s.outcome}] {s.action} → {s.finding}"
+            f"  {s.step_num}.[{s.outcome}] {s.action}: {s.finding}"
             for s in steps
         )
         rem_text = "\n".join(
-            f"  {r.action} on {r.target}: {'✓' if r.success else '✗'} {r.message}"
+            f"  {r.action}/{r.target}: {'ok' if r.success else 'fail'} {r.message}"
             for r in remediations
-        ) or "  None attempted"
+        ) or "  none"
 
-        evidence_summary = json.dumps(
-            {k: str(v)[:300] for k, v in evidence.items()},
-            indent=2,
-        )
+        evidence_text = _format_evidence(evidence)
 
-        prompt = f"""You are an SRE escalating a Kubernetes pod issue from L1 to L2.
+        prompt = f"""SRE escalating a K8s pod issue L1->L2.
 
-Pod: {pod} | Namespace: {namespace}
-Failure class: {failure_class}
-L1 summary: {summary}
+Pod: {pod} | ns: {namespace} | failure: {failure_class}
+Summary: {summary}
 
-L1 steps taken:
+Steps:
 {steps_text}
 
-L1 remediations attempted:
+Remediations:
 {rem_text}
 
 Evidence:
-{evidence_summary}
+{evidence_text}
 
-Generate a numbered list of 3–6 specific, actionable steps for the L2 engineer who picks this up.
-Be concrete — include kubectl commands where relevant.
-Return ONLY the numbered list, nothing else."""
+List 3-6 concrete L2 actions, kubectl commands where relevant. Numbered list only, nothing else."""
 
         response = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=600,
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -208,6 +202,24 @@ Return ONLY the numbered list, nothing else."""
 
     except Exception:
         return _fallback_l2_actions(failure_class)
+
+
+def _format_evidence(evidence: dict, max_chars: int = 250) -> str:
+    """
+    Flatten evidence into compact 'key: value' lines instead of pretty-printed
+    JSON. Avoids spending prompt tokens on braces/quotes/indentation and on
+    Python's list repr (brackets, escaped quotes) for list-valued fields.
+    """
+    lines = []
+    for key, value in evidence.items():
+        if isinstance(value, list):
+            text = "; ".join(str(v) for v in value)
+        elif isinstance(value, dict):
+            text = json.dumps(value, separators=(",", ":"))
+        else:
+            text = str(value)
+        lines.append(f"{key}: {text[:max_chars]}")
+    return "\n".join(lines)
 
 
 def _fallback_l2_actions(failure_class: str) -> list[str]:

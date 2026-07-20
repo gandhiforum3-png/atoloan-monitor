@@ -30,6 +30,23 @@ anthropic:
 
 replicaCount: 1
 
+watcher:
+  # Persistent Kubernetes watch stream (not polling) that diagnoses pods the
+  # moment their status turns unhealthy.
+  enabled: true
+  # Minimum seconds between re-diagnosing the same pod for the same failure
+  # signature, so a flapping pod doesn't spam Claude API calls.
+  cooldownSeconds: 60
+  # How many recent watcher-triggered diagnoses to keep in memory (GET /watch/history).
+  historySize: 200
+  # SAFE DEFAULT: false. When false, the watcher is diagnosis-only — it never
+  # passes a deployment name to the L1 runbook, so remediation branches
+  # (restart_pod, patch_memory_limit, force_image_repull) are unreachable.
+  # CLAUDE.md mandates a 7-day observation-only period on first deployment
+  # that "cannot be skipped" — only flip this to true as an explicit, recorded
+  # override (see CLAUDE.md's override log), never as a chart default.
+  enableRemediation: false
+
 service:
   type: ClusterIP
   port: 80
