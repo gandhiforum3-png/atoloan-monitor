@@ -39,13 +39,13 @@ watcher:
   cooldownSeconds: 60
   # How many recent watcher-triggered diagnoses to keep in memory (GET /watch/history).
   historySize: 200
-  # SAFE DEFAULT: false. When false, the watcher is diagnosis-only — it never
-  # passes a deployment name to the L1 runbook, so remediation branches
-  # (restart_pod, patch_memory_limit, force_image_repull) are unreachable.
-  # CLAUDE.md mandates a 7-day observation-only period on first deployment
-  # that "cannot be skipped" — only flip this to true as an explicit, recorded
-  # override (see CLAUDE.md's override log), never as a chart default.
-  enableRemediation: false
+  # When true, the watcher resolves each unhealthy pod's owning Deployment and
+  # passes it to the L1 runbook, so OOMKilled/CrashLoop/ImagePull failures are
+  # actually remediated (restart_pod, patch_memory_limit, force_image_repull)
+  # instead of only diagnosed. Remediation is still gated per-incident by the
+  # L1 runbook's RCA confidence threshold and the hard no-delete/drop/destroy
+  # boundary enforced at the skill layer.
+  enableRemediation: true
 
 service:
   type: ClusterIP

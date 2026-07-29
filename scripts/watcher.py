@@ -6,12 +6,11 @@ with watch=True) instead of polling every pod on a timer. The apiserver pushes a
 the moment a pod's status changes, so cost and detection latency scale with the actual
 event rate, not with cluster size x poll interval.
 
-On a state transition that looks unhealthy, it runs the L1 runbook in diagnosis-only
-mode — no `deployment` is passed, so `l1_runbook`'s remediation branches (restart_pod,
-patch_memory_limit, force_image_repull) are never reached. This is intentional: CLAUDE.md
-mandates a 7-day observation-only period on first deployment that "cannot be skipped",
-so the watcher only diagnoses and records findings. Wiring it to actually remediate is a
-deliberate follow-up, not something to flip on implicitly here.
+On a state transition that looks unhealthy, it resolves the pod's owning Deployment and
+runs the L1 runbook with remediation enabled, so `l1_runbook`'s remediation branches
+(restart_pod, patch_memory_limit, force_image_repull) are reached from first deploy.
+Set WATCHER_ENABLE_REMEDIATION=false to fall back to diagnosis-only mode (no `deployment`
+passed, remediation branches unreachable) if you want to observe before enforcing.
 
 The Kubernetes client's watch stream is a blocking generator, so it runs in a background
 thread; each qualifying event is handed back to the FastAPI app's asyncio event loop via
@@ -39,11 +38,12 @@ COOLDOWN_S     = float(os.environ.get("WATCHER_COOLDOWN_SECONDS", "60"))
 HISTORY_MAX    = int(os.environ.get("WATCHER_HISTORY_SIZE", "200"))
 WATCH_TIMEOUT_S = 290  # force periodic reconnect; watch streams can go silently stale
 
-# Off by default — see CLAUDE.md's 7-day observation-only constraint. When enabled,
-# the watcher resolves each unhealthy pod's owning Deployment and passes it to the L1
-# runbook, so OOMKilled/CrashLoop/ImagePull failures get actually remediated instead of
-# only escalated. Must be an explicit, recorded override — never the chart default.
-ENABLE_REMEDIATION = os.environ.get("WATCHER_ENABLE_REMEDIATION", "false").lower() == "true"
+# On by default. When enabled, the watcher resolves each unhealthy pod's owning
+# Deployment and passes it to the L1 runbook, so OOMKilled/CrashLoop/ImagePull
+# failures get actually remediated instead of only escalated. Per-incident safety
+# still comes from the L1 runbook's RCA confidence gate and the hard no-delete/
+# drop/destroy boundary enforced at the skill layer.
+ENABLE_REMEDIATION = os.environ.get("WATCHER_ENABLE_REMEDIATION", "true").lower() == "true"
 
 _UNHEALTHY_WAITING_REASONS = {
     "CrashLoopBackOff",

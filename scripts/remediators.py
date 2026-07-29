@@ -16,6 +16,7 @@ Functions:
   force_image_repull()   — rollout restart to force a fresh image pull
   delete_stuck_pod()     — force-delete a stuck Terminating pod (explicit opt-in)
   verify_pod_healthy()   — poll until pod is Ready or timeout
+  wait_and_reverify()    — no-write: wait for a transient condition to self-resolve, then re-observe
 """
 
 from __future__ import annotations
@@ -458,3 +459,34 @@ async def verify_pod_healthy(
         await asyncio.sleep(poll_interval_s)
 
     return False, f"Timeout after {timeout_s}s — pod '{pod_prefix}*' did not become Ready."
+
+
+async def wait_and_reverify(
+    pod: str,
+    namespace: str = "default",
+    wait_s: float = 30,
+    timeout_s: float = 120,
+    poll_interval_s: float = 10,
+) -> tuple[bool, str]:
+    """
+    No-write remediation for transient conditions (a pod still slowly
+    ContainerCreating, a flaky readiness probe): wait, then re-observe the
+    *same* pod object — never deletes or patches anything, never calls a
+    write verb. Used by Tier-1 catalog entries that are safe by construction
+    because they don't touch cluster state at all.
+    """
+    from pod_observer import get_pod_status
+
+    await asyncio.sleep(wait_s)
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        status = await get_pod_status(pod, namespace)
+        if status.phase == "Running" and status.ready:
+            return True, f"Pod '{pod}' is Running and Ready after waiting."
+        if time.monotonic() >= deadline:
+            return False, (
+                f"Pod '{pod}' still not Ready after {wait_s + timeout_s:.0f}s total wait "
+                f"(phase={status.phase.value})."
+            )
+        await asyncio.sleep(poll_interval_s)

@@ -30,6 +30,8 @@ from typing import Optional
 import anthropic
 
 from k8s_tools import POD_OBSERVER_TOOLS, execute_tool, tool_result_block
+from models import IssueReport
+from pod_observer import resolve_owning_deployment
 
 
 # ---------------------------------------------------------------------------
@@ -65,13 +67,37 @@ Follow this discipline:
 2. Run composite tools (diagnose_crash, diagnose_pending, namespace_health_sweep)
    first for efficiency; drill into specific tools only if you need more detail.
 3. Interpret in order: phase → container state → events → logs → resources.
-4. Stop calling tools once you have enough evidence to state the root cause confidently.
+4. Actively check for failure modes beyond the obvious five (OOMKilled,
+   CrashLoopBackOff, ImagePullBackOff, FailedScheduling, ProbeFailure) — use the
+   more specific tools when the signature suggests them:
+     - CreateContainerConfigError / a missing config reference -> diagnose_container_config_error
+     - An init container crash-looping -> diagnose_init_container_crash
+     - A pod stuck ContainerCreating -> diagnose_stuck_container_creating
+     - A Running pod whose node might be pressured -> check_pod_node_pressure
+     - A healthy pod that seems to receive no traffic -> diagnose_endpoint_mismatch
+     - A Deployment that never finished rolling out -> get_deployment_conditions
+     - A namespace-level quota, PDB, or HPA problem -> get_resourcequota_status,
+       get_pdb_status, get_hpa_status
+   Call resolve_owning_deployment early — most remediation actions need it.
+5. Stop calling tools once you have enough evidence to state the root cause confidently.
 
 Always end with a structured answer in this exact format:
 
 FINDING: <one sentence — what is wrong>
 EVIDENCE: <the specific data that proves it>
 ROOT CAUSE: <why it is happening>
+CLASSIFICATION: <exactly one token from this list, nothing else on the line —
+  no parentheses, no qualifiers, no extra words, even if you have caveats:
+  OOMKilled, CrashLoopBackOff, ImagePullBackOff, CreateContainerConfigError,
+  CreateContainerError, InvalidImageName, ErrImageNeverPull, ContainerCreatingStuck,
+  InitContainerFailure, FailedScheduling, NodePressure, EndpointMismatch,
+  VolumeMountError, Evicted, RolloutStuck, QuotaExceeded, PDBBlocked, TaintMismatch,
+  HPADegraded, Healthy, Unknown
+  Put any caveat, risk, or nuance in ROOT CAUSE or NEXT STEPS instead — e.g. a pod
+  that is Running+Ready but at risk of CPU throttling is still CLASSIFICATION: Healthy,
+  with the throttling risk described in ROOT CAUSE and a mitigation in NEXT STEPS.>
+CONFIDENCE: <high|medium|low — how directly the evidence supports CLASSIFICATION>
+DEPLOYMENT: <owning deployment name, or "none">
 NEXT STEPS:
 - <action 1>
 - <action 2>
@@ -83,13 +109,17 @@ async def _run_agent_loop(
     client: anthropic.AsyncAnthropic,
     model: str = "claude-sonnet-4-6",
     max_iterations: int = 8,
-) -> tuple[str, int]:
+) -> tuple[str, int, list[dict]]:
     """
     Core agentic tool-use loop.
-    Returns (final_text, tool_calls_made).
+    Returns (final_text, tool_calls_made, tool_trace).
+    tool_trace is every {tool, input, result} call made during the loop —
+    the raw evidence behind the final narrative, used by find_issue() to
+    populate IssueReport.evidence for the Remediation Agent.
     """
     messages = [{"role": "user", "content": initial_message}]
     tool_calls_made = 0
+    tool_trace: list[dict] = []
 
     for _ in range(max_iterations):
         response = await client.messages.create(
@@ -109,7 +139,7 @@ async def _run_agent_loop(
                 block.text for block in response.content
                 if hasattr(block, "text")
             )
-            return final_text, tool_calls_made
+            return final_text, tool_calls_made, tool_trace
 
         if response.stop_reason == "tool_use":
             # Execute all tool calls in this turn in parallel
@@ -120,6 +150,9 @@ async def _run_agent_loop(
                 execute_tool(b.name, b.input)
                 for b in tool_use_blocks
             ])
+
+            for block, result in zip(tool_use_blocks, results):
+                tool_trace.append({"tool": block.name, "input": block.input, "result": result})
 
             tool_result_blocks = [
                 tool_result_block(block.id, result)
@@ -132,7 +165,7 @@ async def _run_agent_loop(
             # Unexpected stop reason — bail out
             break
 
-    return "Max iterations reached without a final diagnosis.", tool_calls_made
+    return "Max iterations reached without a final diagnosis.", tool_calls_made, tool_trace
 
 
 def _parse_structured_answer(text: str) -> tuple[str, str, str, list[str]]:
@@ -164,6 +197,24 @@ def _parse_structured_answer(text: str) -> tuple[str, str, str, list[str]]:
             root_cause += " " + line
 
     return finding, evidence, root_cause, next_steps
+
+
+def _parse_issue_fields(text: str) -> tuple[str, str, str]:
+    """Parse the CLASSIFICATION / CONFIDENCE / DEPLOYMENT lines the system prompt requires."""
+    classification = "Unknown"
+    confidence     = "low"
+    deployment     = "none"
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("CLASSIFICATION:"):
+            classification = line[len("CLASSIFICATION:"):].strip() or "Unknown"
+        elif line.startswith("CONFIDENCE:"):
+            confidence = line[len("CONFIDENCE:"):].strip().lower() or "low"
+        elif line.startswith("DEPLOYMENT:"):
+            deployment = line[len("DEPLOYMENT:"):].strip() or "none"
+
+    return classification, confidence, deployment
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +250,7 @@ async def diagnose_pod(
         f"Use the available tools to determine what is wrong and why."
     )
 
-    summary, tool_calls = await _run_agent_loop(message, client, model)
+    summary, tool_calls, _trace = await _run_agent_loop(message, client, model)
     finding, evidence, root_cause, next_steps = _parse_structured_answer(summary)
 
     return DiagnosisResult(
@@ -237,7 +288,7 @@ async def triage_namespace(
         f"Find all pods that are not healthy, explain why, and prioritise the issues."
     )
 
-    summary, tool_calls = await _run_agent_loop(message, client, model)
+    summary, tool_calls, _trace = await _run_agent_loop(message, client, model)
     finding, evidence, root_cause, next_steps = _parse_structured_answer(summary)
 
     return DiagnosisResult(
@@ -246,6 +297,67 @@ async def triage_namespace(
         evidence=evidence,
         root_cause=root_cause,
         next_steps=next_steps,
+        summary=summary,
+        tool_calls_made=tool_calls,
+    )
+
+
+async def find_issue(
+    pod: str,
+    namespace: str = "default",
+    issue_description: str = "",
+    model: str = "claude-sonnet-4-6",
+    api_key: Optional[str] = None,
+) -> IssueReport:
+    """
+    Find-stage entry point for the standalone remediation pipeline (remediate.py).
+
+    Unlike diagnose_pod(), this:
+      - resolves the pod's owning Deployment up front (most remediators need it)
+      - requires the agent to emit a machine-readable CLASSIFICATION/CONFIDENCE
+      - carries the raw tool-call trace in .evidence, not just prose
+
+    The Remediation Agent does not trust CLASSIFICATION/CONFIDENCE blindly — it
+    re-derives the evidence deterministically before acting. This function's job
+    is to propose, not decide.
+
+    Returns:
+        IssueReport for remediation_agent.dispatch()
+    """
+    client = anthropic.AsyncAnthropic(api_key=api_key or os.environ["ANTHROPIC_API_KEY"])
+
+    deployment = await resolve_owning_deployment(pod, namespace)
+
+    issue_context = f" The reported symptom: {issue_description}." if issue_description else ""
+    deployment_context = (
+        f" Owning Deployment: {deployment}." if deployment
+        else " This pod has no owning Deployment (bare pod, StatefulSet, or DaemonSet)."
+    )
+    message = (
+        f"Investigate pod '{pod}' in namespace '{namespace}'.{issue_context}{deployment_context} "
+        f"Use the available tools to determine what is wrong and why."
+    )
+
+    summary, tool_calls, trace = await _run_agent_loop(message, client, model)
+    finding, evidence_text, root_cause, next_steps = _parse_structured_answer(summary)
+    classification, confidence, parsed_deployment = _parse_issue_fields(summary)
+
+    if not deployment and parsed_deployment not in ("none", ""):
+        deployment = parsed_deployment
+
+    return IssueReport(
+        pod=pod,
+        namespace=namespace,
+        deployment=deployment,
+        classification=classification,
+        confidence=confidence,
+        finding=finding or summary[:200],
+        root_cause=root_cause,
+        evidence={
+            "evidence_text": evidence_text,
+            "next_steps": next_steps,
+            "tool_trace": trace,
+        },
         summary=summary,
         tool_calls_made=tool_calls,
     )

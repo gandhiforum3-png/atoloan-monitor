@@ -17,25 +17,34 @@ import asyncio
 import json
 import re
 import shlex
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from models import (
+    ConfigRefCheck,
+    ContainerCreatingStatus,
     ContainerResources,
     ContainerStatus,
     ContainerTerminatedState,
     ContainerWaitingState,
     CrashDiagnosis,
+    DeploymentConditionStatus,
+    EndpointMismatch,
     EndpointStatus,
     EventType,
     FailureClass,
+    HPAStatus,
     K8sEvent,
     NamespaceHealthReport,
     NamespacePod,
     NodeCondition,
+    NodePressureCheck,
+    PDBStatus,
     PendingDiagnosis,
     PodLogs,
     PodPhase,
     PodStatus,
+    QuotaStatus,
     ResourceRequest,
     ResourceUsage,
     ContainerResources,
@@ -156,6 +165,34 @@ def _infer_failure_hint(container_statuses: list[ContainerStatus]) -> Optional[s
     return None
 
 
+def _parse_k8s_quantity(qty: Optional[str]) -> float:
+    """Best-effort parser for k8s resource quantities: cpu millicores, memory bytes, or plain counts."""
+    if not qty:
+        return 0.0
+    qty = str(qty)
+    if qty.endswith("m"):
+        try:
+            return float(qty[:-1]) / 1000
+        except ValueError:
+            return 0.0
+    units = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4,
+             "K": 1000, "M": 1000**2, "G": 1000**3}
+    for suffix, mult in units.items():
+        if qty.endswith(suffix):
+            try:
+                return float(qty[:-len(suffix)]) * mult
+            except ValueError:
+                return 0.0
+    try:
+        return float(qty)
+    except ValueError:
+        return 0.0
+
+
+def _quota_at_or_over(used: Optional[str], hard: Optional[str]) -> bool:
+    return _parse_k8s_quantity(used) >= _parse_k8s_quantity(hard)
+
+
 # ---------------------------------------------------------------------------
 # Public observer functions
 # ---------------------------------------------------------------------------
@@ -208,8 +245,34 @@ async def get_pod_status(pod: str, namespace: str = "default") -> PodStatus:
         init_container_statuses=init_container_statuses,
         conditions=conditions,
         start_time=status.get("startTime"),
+        reason=status.get("reason"),
+        deletion_timestamp=meta.get("deletionTimestamp"),
         failure_hint=failure_hint,
     )
+
+
+async def resolve_owning_deployment(pod: str, namespace: str = "default") -> Optional[str]:
+    """
+    Walk pod -> ReplicaSet -> Deployment via ownerReferences.
+    Returns the owning Deployment name, or None if the pod isn't Deployment-managed
+    (bare pod, StatefulSet, DaemonSet) or the chain can't be resolved.
+    """
+    rc, pod_data, _ = await _kubectl_json("get", "pod", pod, "-n", namespace)
+    if rc != 0:
+        return None
+
+    owners = pod_data.get("metadata", {}).get("ownerReferences", []) or []
+    rs_owner = next((o for o in owners if o.get("kind") == "ReplicaSet"), None)
+    if not rs_owner:
+        return None
+
+    rc, rs_data, _ = await _kubectl_json("get", "replicaset", rs_owner["name"], "-n", namespace)
+    if rc != 0:
+        return None
+
+    rs_owners = rs_data.get("metadata", {}).get("ownerReferences", []) or []
+    dep_owner = next((o for o in rs_owners if o.get("kind") == "Deployment"), None)
+    return dep_owner["name"] if dep_owner else None
 
 
 async def get_pod_logs(
@@ -434,6 +497,255 @@ async def get_endpoints(service: str, namespace: str = "default") -> EndpointSta
     )
 
 
+async def check_pod_node_pressure(pod: str, namespace: str = "default") -> NodePressureCheck:
+    """
+    Check whether the node a Running pod is scheduled on has active pressure
+    conditions (MemoryPressure/DiskPressure/PIDPressure/NotReady). Unlike
+    diagnose_pending(), this is meaningful for pods that are already Running —
+    it catches pressure building up on a node before eviction happens.
+    """
+    status = await get_pod_status(pod, namespace)
+    if not status.node:
+        return NodePressureCheck(
+            pod=pod, namespace=namespace,
+            summary="Pod not yet scheduled to a node.",
+        )
+
+    all_conditions = await get_node_conditions(pressure_only=True)
+    node_conditions = [c for c in all_conditions if c.node == status.node]
+    pressured = len(node_conditions) > 0
+
+    summary = (
+        f"Node '{status.node}' has active pressure: "
+        f"{', '.join(c.condition for c in node_conditions)}."
+        if pressured else
+        f"Node '{status.node}' has no active pressure conditions."
+    )
+
+    return NodePressureCheck(
+        pod=pod, namespace=namespace, node=status.node,
+        conditions=node_conditions, pressured=pressured, summary=summary,
+    )
+
+
+async def diagnose_endpoint_mismatch(
+    pod: str,
+    namespace: str = "default",
+    service: Optional[str] = None,
+) -> EndpointMismatch:
+    """
+    Check whether a pod's labels actually satisfy a Service's selector.
+    A common, hard-to-spot bug: the pod is perfectly healthy but a label typo
+    means no Service ever routes traffic to it.
+
+    If `service` is omitted, best-effort discovers a candidate by scanning
+    Services in the namespace for a selector that matches (or partially
+    overlaps) the pod's labels.
+    """
+    rc, pod_data, err = await _kubectl_json("get", "pod", pod, "-n", namespace)
+    if rc != 0:
+        return EndpointMismatch(pod=pod, namespace=namespace, summary=f"kubectl error: {err}")
+
+    pod_labels = pod_data.get("metadata", {}).get("labels", {}) or {}
+
+    if service:
+        rc_svc, svc_data, _ = await _kubectl_json("get", "service", service, "-n", namespace)
+        candidate_services = [svc_data] if rc_svc == 0 else []
+    else:
+        rc_list, list_data, _ = await _kubectl_json("get", "services", "-n", namespace)
+        candidate_services = list_data.get("items", []) if rc_list == 0 else []
+
+    best_service: Optional[str] = None
+    best_selector: dict[str, str] = {}
+    best_match = False
+
+    for svc in candidate_services:
+        selector = svc.get("spec", {}).get("selector", {}) or {}
+        if not selector:
+            continue
+        matches = all(pod_labels.get(k) == v for k, v in selector.items())
+        overlap = any(k in pod_labels for k in selector)
+        if matches:
+            best_service, best_selector, best_match = svc["metadata"]["name"], selector, True
+            break
+        if overlap and best_service is None:
+            best_service, best_selector = svc["metadata"]["name"], selector
+
+    if best_service is None:
+        return EndpointMismatch(
+            pod=pod, namespace=namespace, pod_labels=pod_labels,
+            summary="No Service in the namespace selects this pod's labels.",
+        )
+
+    endpoints = await get_endpoints(best_service, namespace)
+    pod_ip = pod_data.get("status", {}).get("podIP")
+    pod_in_endpoints = bool(pod_ip) and any(pod_ip in addr for addr in endpoints.ready_addresses)
+
+    summary = (
+        f"Service '{best_service}' selector matches pod labels; pod_in_endpoints={pod_in_endpoints}."
+        if best_match else
+        f"Service '{best_service}' selector does NOT fully match pod labels — "
+        f"selector={best_selector}, pod_labels={pod_labels}."
+    )
+
+    return EndpointMismatch(
+        pod=pod, namespace=namespace, service=best_service,
+        pod_labels=pod_labels, selector=best_selector,
+        labels_match=best_match, pod_in_endpoints=pod_in_endpoints,
+        summary=summary,
+    )
+
+
+async def get_deployment_conditions(deployment: str, namespace: str = "default") -> DeploymentConditionStatus:
+    """
+    Read a Deployment's .status.conditions. Flags ProgressDeadlineExceeded —
+    a stuck rollout that a new ReplicaSet never became healthy from.
+    """
+    rc, data, err = await _kubectl_json("get", "deployment", deployment, "-n", namespace)
+    if rc != 0:
+        return DeploymentConditionStatus(
+            deployment=deployment, namespace=namespace,
+            summary=f"kubectl error: {err}",
+        )
+
+    status = data.get("status", {})
+    conditions = {c["type"]: c for c in status.get("conditions", [])}
+    progressing_cond = conditions.get("Progressing", {})
+    available_cond   = conditions.get("Available", {})
+
+    progressing     = progressing_cond.get("status")
+    progress_reason = progressing_cond.get("reason")
+    available       = available_cond.get("status")
+    stuck           = progress_reason == "ProgressDeadlineExceeded"
+
+    summary = (
+        f"Deployment stuck: {progress_reason}." if stuck else
+        f"Progressing={progressing}, Available={available}."
+    )
+
+    return DeploymentConditionStatus(
+        deployment=deployment, namespace=namespace,
+        progressing=progressing, progress_reason=progress_reason, available=available,
+        replicas_desired=data.get("spec", {}).get("replicas", 0),
+        replicas_available=status.get("availableReplicas", 0),
+        replicas_updated=status.get("updatedReplicas", 0),
+        stuck=stuck, summary=summary,
+    )
+
+
+async def get_resourcequota_status(namespace: str = "default") -> QuotaStatus:
+    """
+    Read ResourceQuota objects in a namespace and flag any dimension at or over its hard limit.
+    Diagnose-only — quota limits are a namespace policy decision, never auto-adjusted.
+    """
+    rc, data, err = await _kubectl_json("get", "resourcequota", "-n", namespace)
+    if rc != 0:
+        return QuotaStatus(namespace=namespace, summary=f"kubectl error: {err}")
+
+    quotas: list[dict] = []
+    exceeded: list[str] = []
+    for item in data.get("items", []):
+        name   = item["metadata"]["name"]
+        status = item.get("status", {})
+        hard   = status.get("hard", {})
+        used   = status.get("used", {})
+        quotas.append({"name": name, "hard": hard, "used": used})
+        for dim, hard_val in hard.items():
+            used_val = used.get(dim)
+            if used_val is not None and _quota_at_or_over(used_val, hard_val):
+                exceeded.append(f"{name}/{dim}: {used_val}/{hard_val}")
+
+    if exceeded:
+        summary = f"{len(exceeded)} quota dimension(s) at/over limit: {'; '.join(exceeded[:3])}"
+    elif quotas:
+        summary = f"{len(quotas)} ResourceQuota object(s), none exceeded."
+    else:
+        summary = "No ResourceQuota in this namespace."
+
+    return QuotaStatus(namespace=namespace, quotas=quotas, exceeded=exceeded, summary=summary)
+
+
+async def get_pdb_status(namespace: str = "default", name: Optional[str] = None) -> PDBStatus:
+    """
+    Read PodDisruptionBudget status. If `name` is omitted, returns the most
+    restrictive PDB in the namespace (disruptionsAllowed == 0) if any, else the first.
+    Diagnose-only — PDBs are never patched automatically.
+    """
+    args = ["get", "poddisruptionbudget"]
+    if name:
+        args.append(name)
+    args += ["-n", namespace]
+
+    rc, data, err = await _kubectl_json(*args)
+    if rc != 0:
+        return PDBStatus(namespace=namespace, name=name or "", summary=f"kubectl error: {err}")
+
+    items = [data] if name else data.get("items", [])
+    if not items:
+        return PDBStatus(namespace=namespace, name=name or "", summary="No PodDisruptionBudget found.")
+
+    chosen = None
+    for item in items:
+        if item.get("status", {}).get("disruptionsAllowed", 1) == 0:
+            chosen = item
+            break
+    chosen = chosen or items[0]
+
+    status = chosen.get("status", {})
+    disruptions_allowed = status.get("disruptionsAllowed", 0)
+    blocking = disruptions_allowed == 0
+
+    summary = (
+        f"PDB '{chosen['metadata']['name']}' allows 0 disruptions — voluntary eviction/drain will be blocked."
+        if blocking else
+        f"PDB '{chosen['metadata']['name']}' allows {disruptions_allowed} disruption(s)."
+    )
+
+    return PDBStatus(
+        namespace=namespace, name=chosen["metadata"]["name"],
+        disruptions_allowed=disruptions_allowed,
+        current_healthy=status.get("currentHealthy", 0),
+        desired_healthy=status.get("desiredHealthy", 0),
+        blocking=blocking, summary=summary,
+    )
+
+
+async def get_hpa_status(name: str, namespace: str = "default") -> HPAStatus:
+    """
+    Read a HorizontalPodAutoscaler's .status.conditions. Flags AbleToScale=False
+    or ScalingActive=False — usually metrics-server unavailable or misconfigured metrics.
+    """
+    rc, data, err = await _kubectl_json("get", "horizontalpodautoscaler", name, "-n", namespace)
+    if rc != 0:
+        return HPAStatus(namespace=namespace, name=name, summary=f"kubectl error: {err}")
+
+    status = data.get("status", {})
+    conditions = {c["type"]: c for c in status.get("conditions", [])}
+    able_cond   = conditions.get("AbleToScale", {})
+    active_cond = conditions.get("ScalingActive", {})
+
+    able_to_scale  = (able_cond.get("status") == "True") if able_cond else None
+    scaling_active = (active_cond.get("status") == "True") if active_cond else None
+    degraded = (able_to_scale is False) or (scaling_active is False)
+
+    reason = None
+    if degraded:
+        reason = able_cond.get("reason") if able_to_scale is False else active_cond.get("reason")
+
+    summary = (
+        f"HPA degraded: {reason}." if degraded else
+        f"HPA healthy — able_to_scale={able_to_scale}, scaling_active={scaling_active}."
+    )
+
+    return HPAStatus(
+        namespace=namespace, name=name,
+        able_to_scale=able_to_scale, scaling_active=scaling_active,
+        current_replicas=status.get("currentReplicas", 0),
+        desired_replicas=status.get("desiredReplicas", 0),
+        degraded=degraded, reason=reason, summary=summary,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Composite diagnostic functions
 # ---------------------------------------------------------------------------
@@ -509,6 +821,161 @@ async def diagnose_crash(pod: str, namespace: str = "default") -> CrashDiagnosis
         memory_limit=memory_limit,
         memory_usage=memory_usage,
         summary=summary,
+    )
+
+
+async def diagnose_container_config_error(pod: str, namespace: str = "default") -> ConfigRefCheck:
+    """
+    Audit a pod spec's env/envFrom/volumes for ConfigMap and Secret references
+    and check each referenced object actually exists.
+
+    If everything referenced exists, CreateContainerConfigError is usually a
+    startup race (pod scheduled before the object was created) — safe to
+    restart. If something is missing, it needs a human to create/fix it.
+    """
+    rc, data, err = await _kubectl_json("get", "pod", pod, "-n", namespace)
+    if rc != 0:
+        return ConfigRefCheck(pod=pod, namespace=namespace, summary=f"kubectl error: {err}")
+
+    spec = data.get("spec", {})
+    refs: set[tuple[str, str]] = set()
+
+    def _add(kind: str, name: Optional[str]) -> None:
+        if name:
+            refs.add((kind, name))
+
+    containers = spec.get("containers", []) + spec.get("initContainers", [])
+    for c in containers:
+        for ef in c.get("envFrom", []):
+            if "configMapRef" in ef:
+                _add("configmap", ef["configMapRef"].get("name"))
+            if "secretRef" in ef:
+                _add("secret", ef["secretRef"].get("name"))
+        for e in c.get("env", []):
+            vf = e.get("valueFrom", {}) or {}
+            if "configMapKeyRef" in vf:
+                _add("configmap", vf["configMapKeyRef"].get("name"))
+            if "secretKeyRef" in vf:
+                _add("secret", vf["secretKeyRef"].get("name"))
+
+    for v in spec.get("volumes", []):
+        if "configMap" in v:
+            _add("configmap", v["configMap"].get("name"))
+        if "secret" in v:
+            _add("secret", v["secret"].get("secretName"))
+
+    results = await asyncio.gather(*[_kubectl("get", kind, name, "-n", namespace) for kind, name in refs])
+
+    missing: list[str] = []
+    present: list[str] = []
+    for (kind, name), (rc2, _, _) in zip(refs, results):
+        label = f"{kind}/{name}"
+        (present if rc2 == 0 else missing).append(label)
+
+    all_present = len(missing) == 0
+    summary = (
+        "All referenced ConfigMaps/Secrets exist — likely a startup race, safe to restart."
+        if all_present else
+        f"Missing referenced object(s): {', '.join(missing)}. Needs a human to create/fix them."
+    )
+
+    return ConfigRefCheck(
+        pod=pod, namespace=namespace,
+        missing_refs=missing, present_refs=present,
+        all_present=all_present, summary=summary,
+    )
+
+
+async def diagnose_init_container_crash(pod: str, namespace: str = "default") -> CrashDiagnosis:
+    """
+    Init-container equivalent of diagnose_crash() — pinpoints which init
+    container is failing, its exit code/reason, and that container's
+    previous-crash logs specifically (not the main container's).
+    """
+    status = await get_pod_status(pod, namespace)
+    init_statuses = status.init_container_statuses
+
+    exit_code: Optional[int] = None
+    kill_reason: Optional[str] = None
+    crashing_container: Optional[str] = None
+
+    for cs in init_statuses:
+        if cs.waiting and cs.waiting.reason == "CrashLoopBackOff" and crashing_container is None:
+            crashing_container = cs.name
+        term = cs.last_state or cs.terminated
+        if term and term.exit_code not in (None, 0) and exit_code is None:
+            exit_code = term.exit_code
+            kill_reason = term.reason
+            crashing_container = crashing_container or cs.name
+
+    events = await get_pod_events(pod, namespace)
+
+    if crashing_container:
+        prev_log = await get_pod_logs(pod, namespace, container=crashing_container, previous=True, tail=100)
+        summary = (
+            f"Init container '{crashing_container}' failed — exit {exit_code}, "
+            f"reason: {kill_reason or 'unknown'}. "
+            f"Last log lines: {' | '.join(prev_log.lines[-5:])}"
+        )
+        logs = prev_log.lines
+    else:
+        summary = "No failing init container found in current status."
+        logs = []
+
+    return CrashDiagnosis(
+        pod=pod, namespace=namespace,
+        failure_class=FailureClass.INIT_FAILURE,
+        exit_code=exit_code,
+        kill_reason=kill_reason,
+        restart_count=sum(cs.restart_count for cs in init_statuses),
+        previous_logs=logs,
+        recent_events=[e for e in events if e.type == EventType.WARNING],
+        summary=summary,
+    )
+
+
+async def diagnose_stuck_container_creating(pod: str, namespace: str = "default") -> ContainerCreatingStatus:
+    """
+    How long a pod has been in ContainerCreating, and whether events point to
+    a specific cause (volume attach delay, CNI/sandbox failure) vs. just a
+    slow-but-progressing image pull.
+    """
+    rc, data, err = await _kubectl_json("get", "pod", pod, "-n", namespace)
+    if rc != 0:
+        return ContainerCreatingStatus(pod=pod, namespace=namespace, summary=f"kubectl error: {err}")
+
+    start_time_str = data.get("status", {}).get("startTime")
+    stuck_seconds = 0.0
+    if start_time_str:
+        try:
+            start_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+            stuck_seconds = (datetime.now(timezone.utc) - start_dt).total_seconds()
+        except ValueError:
+            pass
+
+    events = await get_pod_events(pod, namespace)
+    adverse_reasons = {"FailedMount", "FailedAttachVolume", "FailedCreatePodSandBox", "NetworkNotReady"}
+    adverse = [e for e in events if e.reason in adverse_reasons]
+
+    likely_cause: Optional[str] = None
+    if any(e.reason in ("FailedMount", "FailedAttachVolume") for e in adverse):
+        likely_cause = "volume_attach"
+    elif any(e.reason in ("FailedCreatePodSandBox", "NetworkNotReady") for e in adverse):
+        likely_cause = "cni"
+    elif stuck_seconds >= 300:
+        likely_cause = "unknown_stuck"
+
+    summary = f"ContainerCreating for {int(stuck_seconds)}s. "
+    summary += f"Likely cause: {likely_cause}. " if likely_cause else ""
+    summary += (
+        f"{len(adverse)} adverse event(s): {adverse[0].message[:120]}"
+        if adverse else "No adverse events observed."
+    )
+
+    return ContainerCreatingStatus(
+        pod=pod, namespace=namespace,
+        stuck_seconds=stuck_seconds, adverse_events=adverse,
+        likely_cause=likely_cause, summary=summary,
     )
 
 
