@@ -22,10 +22,11 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 
 import pod_observer as obs
@@ -57,6 +58,18 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+# ---------------------------------------------------------------------------
+# Dashboard UI
+# ---------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse, tags=["ui"])
+async def dashboard() -> HTMLResponse:
+    """Serves the built-in incident timeline / diagnose / logs dashboard."""
+    return HTMLResponse((STATIC_DIR / "dashboard.html").read_text())
+
 
 # ---------------------------------------------------------------------------
 # Request / response schemas
@@ -71,6 +84,7 @@ class L1DiagnoseRequest(BaseModel):
     pod:        str
     namespace:  str = "default"
     deployment: Optional[str] = None    # enables memory patch, rollback, scale
+    api_key:    Optional[str] = None    # overrides ANTHROPIC_API_KEY for this call
 
 
 class L1SweepRequest(BaseModel):
@@ -136,6 +150,36 @@ async def watch_status() -> dict:
     return watcher.status()
 
 
+@app.get("/watch/live", tags=["watch"])
+async def watch_live() -> dict:
+    """
+    Pods that are unhealthy RIGHT NOW, cluster-wide — derived from current
+    cluster state, not the history log. A pod that was escalated an hour ago
+    but has since recovered, been rescheduled, or deleted will not appear
+    here even though it's still in /watch/history.
+    """
+    pods = await obs.get_namespace_pods(all_namespaces=True)
+    unhealthy = []
+    for p in pods:
+        ready_count, _, total_count = p.ready.partition("/")
+        ready_count = int(ready_count) if ready_count.isdigit() else 0
+        total_count = int(total_count) if total_count.isdigit() else 0
+        # Succeeded (completed Jobs) are healthy by definition even though
+        # their containers show 0/N ready after exiting — don't flag those.
+        # Historical restart counts don't matter here either: a pod that's
+        # Running and fully ready right now is not a live issue, no matter
+        # how many times it crashed in the past (that's what /watch/history
+        # is for). Only current phase/readiness counts as "live".
+        is_unhealthy = (
+            p.phase == "Failed"
+            or p.phase in ("Pending", "Unknown")
+            or (p.phase == "Running" and ready_count < total_count)
+        )
+        if is_unhealthy:
+            unhealthy.append(p.model_dump())
+    return {"count": len(unhealthy), "items": unhealthy}
+
+
 @app.get("/watch/history", tags=["watch"])
 async def watch_history(limit: int = 50) -> dict:
     """
@@ -144,6 +188,41 @@ async def watch_history(limit: int = 50) -> dict:
     passes `deployment`, so nothing here was auto-remediated.
     """
     items = list(watcher.history)[:limit]
+    return {"count": len(items), "items": items}
+
+
+@app.get("/watch/needs-attention", tags=["watch"])
+async def watch_needs_attention() -> dict:
+    """
+    Things L1 couldn't fix on its own and a human should look at — i.e. the
+    most recent history entry per pod where resolution was "escalated" or
+    "needs_human", filtered down to ones that are still actually a problem
+    right now (the pod still exists and hasn't since become healthy on its
+    own). A pod that recovered or was deleted after being escalated won't
+    show up here even though the escalation is still in /watch/history.
+    """
+    latest_by_pod: dict[tuple[str, str], dict] = {}
+    for item in watcher.history:
+        key = (item["pod"], item["namespace"])
+        if key not in latest_by_pod:  # history is newest-first
+            latest_by_pod[key] = item
+
+    candidates = [
+        item for item in latest_by_pod.values()
+        if item["resolution"] in ("escalated", "needs_human")
+    ]
+
+    async def _still_needs_attention(item: dict) -> Optional[dict]:
+        status = await obs.get_pod_status(item["pod"], item["namespace"])
+        if status.phase.value == "Unknown":
+            return None  # pod no longer exists
+        if status.phase.value == "Running" and status.ready:
+            return None  # recovered on its own since the escalation
+        return {**item, "current_phase": status.phase.value, "current_ready": status.ready}
+
+    results = await asyncio.gather(*(_still_needs_attention(item) for item in candidates))
+    items = [r for r in results if r is not None]
+    items.sort(key=lambda i: i["detected_at"], reverse=True)
     return {"count": len(items), "items": items}
 
 
@@ -208,19 +287,24 @@ async def l1_diagnose(req: L1DiagnoseRequest) -> dict:
       - steps: every decision taken
       - remediations: what was tried and whether it worked
       - escalation_packet: structured L2 handoff (if not resolved)
+
+    `api_key` in the request body overrides the ANTHROPIC_API_KEY env var for
+    this call only — lets the dashboard supply a key the user typed in the UI
+    without it ever being baked into a cluster Secret.
     """
-    if not API_KEY:
+    key = req.api_key or API_KEY
+    if not key:
         raise HTTPException(
             status_code=503,
-            detail="ANTHROPIC_API_KEY not set — L2 escalation guidance unavailable. "
-                   "Set the secret and restart the pod.",
+            detail="No Anthropic API key available — set ANTHROPIC_API_KEY on the "
+                   "deployment, or enter one in the dashboard's API key field.",
         )
 
     result = await run_l1_runbook(
         pod=req.pod,
         namespace=req.namespace,
         deployment=req.deployment,
-        api_key=API_KEY,
+        api_key=key,
     )
     return result.model_dump()
 

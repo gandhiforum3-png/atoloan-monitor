@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pod Observer</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-2: #171f2a;
+    --border: #232d3a;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4fa8ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa;
+      --panel: #ffffff;
+      --panel-2: #f0f2f5;
+      --border: #d0d7de;
+      --text: #1f2328;
+      --muted: #59636e;
+      --accent: #0969da;
+      --ok: #1a7f37;
+      --warn: #9a6700;
+      --bad: #cf222e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f14; --panel: #121821; --panel-2: #171f2a; --border: #232d3a;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4fa8ff; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d0d7de;
+    --text: #1f2328; --muted: #59636e; --accent: #0969da; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .stat {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+  }
+  .stat b { color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex-shrink: 0; }
+  .dot.on { background: var(--ok); }
+  .spacer { flex: 1; }
+  #apiBase { font-family: var(--mono); font-size: 11px; color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; width: 160px; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 20px 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel.wide { grid-column: 1 / -1; }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .panel-head h2 { font-size: 13px; margin: 0; font-weight: 600; }
+  .panel-head .muted { color: var(--muted); font-size: 11px; }
+  .panel-body { padding: 10px 14px; overflow-y: auto; }
+
+  #timeline { max-height: 560px; }
+  .incident {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    background: var(--panel-2);
+  }
+  .incident:hover { border-color: var(--accent); }
+  .incident-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .incident-time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .incident-pod { font-weight: 600; }
+  .incident-ns { color: var(--muted); font-size: 12px; }
+  .incident-summary { margin-top: 6px; color: var(--muted); font-size: 12.5px; }
+  .incident-detail { margin-top: 8px; display: none; font-size: 12.5px; }
+  .incident.open .incident-detail { display: block; }
+
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .badge.resolved { color: var(--ok); border-color: var(--ok); }
+  .badge.escalated, .badge.needs_human { color: var(--bad); border-color: var(--bad); }
+  .badge.proposed { color: var(--warn); border-color: var(--warn); }
+  .badge.P1 { color: var(--bad); border-color: var(--bad); }
+  .badge.P2 { color: var(--warn); border-color: var(--warn); }
+  .badge.P3 { color: var(--muted); border-color: var(--border); }
+  .badge.pass, .badge.remediated { color: var(--ok); border-color: var(--ok); }
+  .badge.fail, .badge.escalate { color: var(--bad); border-color: var(--bad); }
+  .badge.ok-fill { background: var(--ok); color: #06280f; border-color: var(--ok); }
+  .badge.bad-fill { background: var(--bad); color: #2a0a08; border-color: var(--bad); }
+
+  form.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  input[type=text], input[type=number] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: var(--mono);
+  }
+  input#pod, input#dpod { width: 160px; }
+  input#ns, input#dns { width: 110px; }
+  input#container { width: 110px; }
+  input#tail { width: 70px; }
+  label.chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+  pre#logs {
+    margin: 0;
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 420px;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+
+  .steps { list-style: none; margin: 8px 0 0; padding: 0; }
+  .steps li {
+    position: relative;
+    padding: 6px 0 6px 18px;
+    border-left: 2px solid var(--border);
+    margin-left: 4px;
+  }
+  .steps li::before {
+    content: "";
+    position: absolute;
+    left: -5px;
+    top: 12px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .steps li .st-action { font-weight: 600; }
+  .steps li .st-finding { color: var(--muted); font-size: 12.5px; }
+  .steps li .st-time { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+
+  .remediation {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    background: var(--panel-2);
+  }
+  .remediation .rem-top { display: flex; gap: 8px; align-items: center; }
+  .remediation .rem-msg { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
+  .empty { color: var(--muted); font-size: 12.5px; padding: 12px 0; text-align: center; }
+  .error-box { color: var(--bad); font-size: 12.5px; padding: 8px 0; }
+  .loading { color: var(--muted); font-size: 12.5px; }
+  .summary-line { font-size: 13px; margin-top: 4px; }
+  code.inline { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pod Observer <span>— live health & auto-remediation</span></h1>
+  <div class="stat"><span class="dot" id="watcherDot"></span><b id="watcherState">unknown</b></div>
+  <div class="stat">events <b id="statEvents">–</b></div>
+  <div class="stat">diagnoses <b id="statDiag">–</b></div>
+  <div class="stat">tracked pods <b id="statTracked">–</b></div>
+  <div class="spacer"></div>
+  <input id="apiBase" type="text" placeholder="API base (same origin)" value="" />
+</header>
+
+<main>
+
+  <section class="panel wide">
+    <div class="panel-head">
+      <h2>Live Issues</h2>
+      <span class="muted">only pods unhealthy right now, cluster-wide · auto-refreshes every 5s</span>
+    </div>
+    <div class="panel-body" id="liveIssues">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section class="panel wide">
+    <div class="panel-head">
+      <h2>Needs Attention</h2>
+      <span class="muted">L1 couldn't fix these on its own — still unresolved right now · auto-refreshes every 5s</span>
+    </div>
+    <div class="panel-body" id="needsAttention">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section class="panel wide">
+    <div class="panel-head">
+      <h2>Historical Incidents</h2>
+      <span class="muted">everything the watcher has ever caught, newest first — stays here even after a pod recovers or is deleted</span>
+    </div>
+    <div class="panel-body" id="timeline">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Investigate / Diagnose a Pod</h2>
+      <span class="muted">runs the full L1 runbook</span>
+    </div>
+    <form class="row" id="keyForm">
+      <input id="apiKey" type="password" placeholder="Anthropic API key (kept in this browser only)" autocomplete="off" style="width: 320px;" />
+      <button type="submit" class="ghost">Save key</button>
+      <button type="button" class="ghost" id="clearKey">Clear</button>
+      <span class="muted" id="keyState"></span>
+    </form>
+    <form class="row" id="diagForm">
+      <input id="dpod" type="text" placeholder="pod name" required />
+      <input id="dns" type="text" placeholder="namespace" value="default" />
+      <button type="submit">Run Diagnosis</button>
+    </form>
+    <div class="panel-body" id="diagResult">
+      <div class="empty">Enter a pod and run a diagnosis to see what's wrong and how it gets fixed.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Pod Logs</h2>
+      <span class="muted">manual fetch</span>
+    </div>
+    <form class="row" id="logForm">
+      <input id="pod" type="text" placeholder="pod name" required />
+      <input id="ns" type="text" placeholder="namespace" value="default" />
+      <input id="container" type="text" placeholder="container (opt.)" />
+      <input id="tail" type="number" placeholder="tail" value="200" />
+      <label class="chk"><input type="checkbox" id="previous" /> previous</label>
+      <button type="submit">Fetch Logs</button>
+    </form>
+    <pre id="logs">Logs will appear here.</pre>
+  </section>
+
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const base = () => ($('apiBase').value || '').replace(/\/$/, '');
+
+  function fmtTime(epochSeconds) {
+    const d = new Date(epochSeconds * 1000);
+    return d.toLocaleString();
+  }
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+  function badge(cls, label) {
+    return `<span class="badge ${esc(cls)}">${esc(label)}</span>`;
+  }
+
+  // ---------------- Watcher status ----------------
+  async function refreshStatus() {
+    try {
+      const r = await fetch(`${base()}/watch/status`);
+      const s = await r.json();
+      $('watcherDot').classList.toggle('on', !!s.running);
+      $('watcherState').textContent = s.running ? 'watching' : 'stopped';
+      $('statEvents').textContent = s.events_seen ?? '–';
+      $('statDiag').textContent = s.diagnoses_triggered ?? '–';
+      $('statTracked').textContent = s.tracked_pods ?? '–';
+    } catch (e) {
+      $('watcherDot').classList.remove('on');
+      $('watcherState').textContent = 'unreachable';
+    }
+  }
+
+  // ---------------- Shared: wire "diagnose" / "view logs" buttons ----------------
+  function wireActionButtons(el) {
+    el.querySelectorAll('[data-diagnose]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        $('dpod').value = btn.dataset.diagnose;
+        $('dns').value = btn.dataset.ns;
+        $('diagForm').requestSubmit();
+        $('diagForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+    el.querySelectorAll('[data-logs]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        $('pod').value = btn.dataset.logs;
+        $('ns').value = btn.dataset.ns;
+        $('logForm').requestSubmit();
+        $('logForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  }
+
+  // ---------------- Live issues (current cluster state only) ----------------
+  function renderLiveIssue(item) {
+    const [readyN, totalN] = String(item.ready || '0/0').split('/');
+    const notReady = readyN !== totalN;
+    return `
+      <div class="incident">
+        <div class="incident-top">
+          <span class="incident-pod">${esc(item.name)}</span>
+          <span class="incident-ns">ns/${esc(item.namespace)}</span>
+          ${badge(item.phase === 'Running' ? 'proposed' : 'bad-fill', item.phase)}
+          ${notReady ? badge('bad-fill', `ready ${esc(item.ready)}`) : `<span class="muted">ready ${esc(item.ready)}</span>`}
+          ${item.restarts > 3 ? badge('bad-fill', `${item.restarts} restarts`) : `<span class="muted">${esc(item.restarts)} restarts</span>`}
+          ${item.node ? `<span class="muted">node/${esc(item.node)}</span>` : ''}
+        </div>
+        <div class="incident-detail" style="display:block;">
+          <button class="ghost" data-diagnose="${esc(item.name)}" data-ns="${esc(item.namespace)}" type="button">Run full diagnosis for this pod</button>
+          <button class="ghost" data-logs="${esc(item.name)}" data-ns="${esc(item.namespace)}" type="button">View logs</button>
+        </div>
+      </div>`;
+  }
+
+  async function refreshLiveIssues() {
+    const el = $('liveIssues');
+    try {
+      const r = await fetch(`${base()}/watch/live`);
+      const data = await r.json();
+      const items = data.items || [];
+      if (items.length === 0) {
+        el.innerHTML = '<div class="empty">No unhealthy pods right now — cluster is clean.</div>';
+        return;
+      }
+      el.innerHTML = items.map(renderLiveIssue).join('');
+      wireActionButtons(el);
+    } catch (e) {
+      el.innerHTML = `<div class="error-box">Could not load live issues: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ---------------- Needs attention (escalated / needs_human, still unresolved) ----------------
+  function renderNeedsAttention(item) {
+    const res = item.resolution || 'unknown';
+    return `
+      <div class="incident">
+        <div class="incident-top">
+          <span class="incident-time">${esc(fmtTime(item.detected_at))}</span>
+          <span class="incident-pod">${esc(item.pod)}</span>
+          <span class="incident-ns">ns/${esc(item.namespace)}</span>
+          ${badge(res, res)}
+          ${badge(item.severity || '', item.severity || '')}
+          <span class="muted">${esc(item.failure_class || '')}</span>
+          <span class="muted">currently: ${esc(item.current_phase)}${item.current_ready ? ' / ready' : ' / not ready'}</span>
+        </div>
+        <div class="incident-summary">${esc(item.summary || '')}</div>
+        <div class="incident-detail" style="display:block;">
+          <button class="ghost" data-diagnose="${esc(item.pod)}" data-ns="${esc(item.namespace)}" type="button">Run full diagnosis for this pod</button>
+          <button class="ghost" data-logs="${esc(item.pod)}" data-ns="${esc(item.namespace)}" type="button">View logs</button>
+        </div>
+      </div>`;
+  }
+
+  async function refreshNeedsAttention() {
+    const el = $('needsAttention');
+    try {
+      const r = await fetch(`${base()}/watch/needs-attention`);
+      const data = await r.json();
+      const items = data.items || [];
+      if (items.length === 0) {
+        el.innerHTML = '<div class="empty">Nothing needs attention right now — no unresolved escalations.</div>';
+        return;
+      }
+      el.innerHTML = items.map(renderNeedsAttention).join('');
+      wireActionButtons(el);
+    } catch (e) {
+      el.innerHTML = `<div class="error-box">Could not load needs-attention list: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ---------------- Incident timeline (historical, permanent) ----------------
+  let openKey = null;
+
+  function renderIncident(item, idx) {
+    const key = `${item.pod}/${item.namespace}/${item.detected_at}`;
+    const res = item.resolution || 'unknown';
+    return `
+      <div class="incident" data-key="${esc(key)}" data-idx="${idx}">
+        <div class="incident-top">
+          <span class="incident-time">${esc(fmtTime(item.detected_at))}</span>
+          <span class="incident-pod">${esc(item.pod)}</span>
+          <span class="incident-ns">ns/${esc(item.namespace)}</span>
+          ${badge(res, res)}
+          ${badge(item.severity || '', item.severity || '')}
+          <span class="muted">${esc(item.failure_class || '')}</span>
+        </div>
+        <div class="incident-summary">${esc(item.summary || '')}</div>
+        <div class="incident-detail">
+          <button class="ghost" data-diagnose="${esc(item.pod)}" data-ns="${esc(item.namespace)}" type="button">Run full diagnosis for this pod</button>
+          <button class="ghost" data-logs="${esc(item.pod)}" data-ns="${esc(item.namespace)}" type="button">View logs</button>
+        </div>
+      </div>`;
+  }
+
+  async function refreshTimeline() {
+    try {
+      const r = await fetch(`${base()}/watch/history?limit=100`);
+      const data = await r.json();
+      const items = data.items || [];
+      const el = $('timeline');
+      if (items.length === 0) {
+        el.innerHTML = '<div class="empty">No incidents detected yet — the watcher will list pod issues here as they happen.</div>';
+        return;
+      }
+      el.innerHTML = items.map(renderIncident).join('');
+      el.querySelectorAll('.incident').forEach((node) => {
+        node.addEventListener('click', (ev) => {
+          if (ev.target.closest('button')) return;
+          node.classList.toggle('open');
+        });
+      });
+      wireActionButtons(el);
+    } catch (e) {
+      $('timeline').innerHTML = `<div class="error-box">Could not load history: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ---------------- API key (stored in this browser only, sent per-request) ----------------
+  const KEY_STORAGE = 'podObserverApiKey';
+
+  function refreshKeyState() {
+    const saved = localStorage.getItem(KEY_STORAGE);
+    $('keyState').textContent = saved ? 'key saved in this browser' : 'no key set — diagnosis will fail until one is entered';
+  }
+
+  $('keyForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const val = $('apiKey').value.trim();
+    if (val) {
+      localStorage.setItem(KEY_STORAGE, val);
+      $('apiKey').value = '';
+    }
+    refreshKeyState();
+  });
+
+  $('clearKey').addEventListener('click', () => {
+    localStorage.removeItem(KEY_STORAGE);
+    $('apiKey').value = '';
+    refreshKeyState();
+  });
+
+  refreshKeyState();
+
+  // ---------------- Diagnosis ----------------
+  function renderSteps(steps) {
+    if (!steps || steps.length === 0) return '';
+    return `<ul class="steps">${steps.map(s => `
+      <li>
+        <div class="st-time">${esc(s.timestamp)} · step ${esc(s.step_num)} ${badge(s.outcome, s.outcome)}</div>
+        <div class="st-action">${esc(s.action)}</div>
+        <div class="st-finding">${esc(s.finding)}</div>
+      </li>`).join('')}</ul>`;
+  }
+
+  function renderRemediations(rems) {
+    if (!rems || rems.length === 0) return '<div class="muted" style="margin-top:8px;">No remediation actions were taken.</div>';
+    return rems.map(r => `
+      <div class="remediation">
+        <div class="rem-top">
+          ${badge(r.success ? 'ok-fill' : 'bad-fill', r.success ? 'succeeded' : 'failed')}
+          <b>${esc(r.action)}</b>
+          <span class="muted">→ ${esc(r.target)} / ${esc(r.namespace)}</span>
+          ${r.dry_run ? badge('proposed', 'dry-run') : ''}
+          ${r.duration_s != null ? `<span class="muted">${Number(r.duration_s).toFixed(2)}s</span>` : ''}
+        </div>
+        <div class="rem-msg">${esc(r.message)}</div>
+      </div>`).join('');
+  }
+
+  async function runDiagnosis(pod, ns) {
+    const el = $('diagResult');
+    el.innerHTML = '<div class="loading">Running Observe → Classify → Remediate → Verify …</div>';
+    try {
+      const apiKey = localStorage.getItem(KEY_STORAGE) || undefined;
+      const r = await fetch(`${base()}/l1/diagnose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pod, namespace: ns, api_key: apiKey }),
+      });
+      if (!r.ok) {
+        const detail = await r.json().catch(() => ({}));
+        el.innerHTML = `<div class="error-box">${esc(r.status)}: ${esc(detail.detail || r.statusText)}</div>`;
+        return;
+      }
+      const res = await r.json();
+      el.innerHTML = `
+        <div>
+          ${badge(res.resolution, res.resolution)} ${badge(res.severity, res.severity)}
+          <b>${esc(res.failure_class)}</b>
+          ${res.resolved_in_s != null ? `<span class="muted">resolved in ${Number(res.resolved_in_s).toFixed(1)}s</span>` : ''}
+        </div>
+        <div class="summary-line">${esc(res.summary)}</div>
+        <h3 style="font-size:12px;margin:14px 0 0;color:var(--muted);">DECISION TREE</h3>
+        ${renderSteps(res.steps)}
+        <h3 style="font-size:12px;margin:14px 0 0;color:var(--muted);">REMEDIATION ACTIONS</h3>
+        ${renderRemediations(res.remediations)}
+        ${res.escalation_packet ? `<h3 style="font-size:12px;margin:14px 0 0;color:var(--muted);">ESCALATION PACKET</h3>
+          <pre style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:11.5px;">${esc(JSON.stringify(res.escalation_packet, null, 2))}</pre>` : ''}
+      `;
+    } catch (e) {
+      el.innerHTML = `<div class="error-box">Request failed: ${esc(e.message)}</div>`;
+    }
+  }
+
+  $('diagForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    runDiagnosis($('dpod').value.trim(), $('dns').value.trim() || 'default');
+  });
+
+  // ---------------- Logs ----------------
+  async function fetchLogs(pod, ns, container, tail, previous) {
+    const el = $('logs');
+    el.textContent = 'Loading…';
+    try {
+      const params = new URLSearchParams({ pod, namespace: ns, tail: String(tail || 200), previous: String(!!previous) });
+      if (container) params.set('container', container);
+      const r = await fetch(`${base()}/observe/logs?${params.toString()}`, { method: 'POST' });
+      if (!r.ok) {
+        const detail = await r.json().catch(() => ({}));
+        el.textContent = `Error ${r.status}: ${detail.detail || r.statusText}`;
+        return;
+      }
+      const data = await r.json();
+      const lines = data.lines || [];
+      el.textContent = (data.truncated ? '… (truncated)\n' : '') + (lines.length ? lines.join('\n') : '(no log output)');
+    } catch (e) {
+      el.textContent = `Request failed: ${e.message}`;
+    }
+  }
+
+  $('logForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    fetchLogs(
+      $('pod').value.trim(),
+      $('ns').value.trim() || 'default',
+      $('container').value.trim(),
+      parseInt($('tail').value, 10) || 200,
+      $('previous').checked
+    );
+  });
+
+  // ---------------- Boot ----------------
+  refreshStatus();
+  refreshLiveIssues();
+  refreshNeedsAttention();
+  refreshTimeline();
+  setInterval(refreshStatus, 5000);
+  setInterval(refreshLiveIssues, 5000);
+  setInterval(refreshNeedsAttention, 5000);
+  setInterval(refreshTimeline, 5000);
+})();
+</script>
+
+</body>
+</html>

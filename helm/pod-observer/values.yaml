@@ -27,6 +27,10 @@ anthropic:
   # Fallback: let the chart create the Secret directly from this value.
   # Fine for a quick install; for anything long-lived prefer existingSecret.
   apiKey: ""
+  # Set true to install with no key at all — the dashboard's "Investigate a
+  # Pod" panel lets you type an Anthropic API key in the browser instead,
+  # sent per-request rather than stored in the cluster.
+  allowMissingKey: false
 
 replicaCount: 1
 

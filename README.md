@@ -83,6 +83,24 @@ helm upgrade pod-observer ./helm/pod-observer \
   --set image.tag=1.1.0
 ```
 
+## Dashboard
+
+The service serves a small built-in dashboard at `/` (same port as the API,
+no extra install) — port-forward and open `http://localhost:8080/` in a
+browser. It shows:
+
+- **Incident timeline** — every issue the watcher has detected, newest
+  first, auto-refreshing: when it happened, which pod, the failure class,
+  and whether it was resolved, escalated, or needs a human.
+- **Investigate a pod** — run the full L1 runbook on demand and see the
+  Observe → Classify → Remediate → Verify decision tree step by step, plus
+  exactly which remediation actions were taken and whether each succeeded.
+- **Logs** — fetch a pod's current or previous (crashed) container logs.
+
+It's a static page (`scripts/static/dashboard.html`) calling the existing
+`/watch/history`, `/l1/diagnose`, and `/observe/logs` endpoints — no new
+dependencies or services.
+
 ## What's inside `scripts/`
 
 Unchanged from the original k8s-pod-observer skill — `api.py` (FastAPI

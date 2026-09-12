@@ -32,7 +32,7 @@ RUN useradd --system --uid 1001 --no-create-home observer
 USER observer
 
 WORKDIR /app
-COPY scripts/ .
+COPY --chown=observer:observer scripts/ .
 
 # When running in-cluster, kubectl automatically uses the mounted
 # ServiceAccount token at /var/run/secrets/kubernetes.io/serviceaccount/

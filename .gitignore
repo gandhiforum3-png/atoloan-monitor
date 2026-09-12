@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .env
 *.env
+.dev-sync.log
+.dev-sync.pid
+.keep-forward.log
+.keep-forward.pid
+.last-manual-tag
+.claude/settings.local.json

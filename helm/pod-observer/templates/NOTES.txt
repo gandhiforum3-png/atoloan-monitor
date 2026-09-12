@@ -8,6 +8,11 @@ Check it's ready (kubectl connectivity + API key both confirmed):
 
 Port-forward to try it locally:
   kubectl port-forward -n {{ .Values.namespace.name }} svc/pod-observer 8080:{{ .Values.service.port }}
+
+Open the dashboard (incident timeline, logs, on-demand diagnosis) in a browser:
+  http://localhost:8080/
+
+Or drive it from the CLI:
   curl -X POST localhost:8080/l1/diagnose \
     -H 'Content-Type: application/json' \
     -d '{"pod": "some-pod-name", "namespace": "default"}'
